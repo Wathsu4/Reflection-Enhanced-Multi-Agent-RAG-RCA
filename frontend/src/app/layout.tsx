@@ -12,6 +12,7 @@ import {
   ClipboardList,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { ServiceStatusPill } from "@/components/service-status-pill";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -94,6 +95,7 @@ export default function RootLayout({
                       Reflection-Enhanced Multi-Agent RAG
                     </h1>
                   </div>
+                  <ServiceStatusPill />
                   <ThemeToggle />
                 </header>
                 <main className="flex flex-1 flex-col gap-4 p-4 lg:gap-6 lg:p-6">

@@ -10,6 +10,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Loader2, Terminal } from "lucide-react";
 import {
+  ClassifierHttpError,
+  ClassifierNetworkError,
+} from "@/lib/api/classifier";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -23,6 +27,33 @@ const logExamples: Record<Severity, string> = {
   ERROR: `[ERROR] 2023-10-27 10:10:22,789 - service-payment - Transaction failed for user 'user@example.com'. Reason: Insufficient funds. Order ID: xyz-789. Exception: PaymentGatewayException.`,
   FATAL_OR_CRITICAL: `[FATAL] 2023-10-27 10:15:30,999 - service-kernel - Core dump initiated. Unhandled segmentation fault at memory address 0xDEADBEEF. The application cannot continue.`,
 };
+
+/** Map a thrown error into user-friendly title + body strings. */
+function describeError(err: unknown): { title: string; body: string } {
+  if (err instanceof ClassifierNetworkError) {
+    return {
+      title: "Cannot reach classifier service",
+      body: "The classifier service did not respond. Make sure it is running on :8001 and that CORS is configured.",
+    };
+  }
+  if (err instanceof ClassifierHttpError) {
+    if (err.status >= 500) {
+      return {
+        title: "Classifier service error",
+        body:
+          err.detail
+            ? `The service returned ${err.status}. Detail: ${err.detail}`
+            : `The service returned ${err.status}. Check its server logs.`,
+      };
+    }
+    return {
+      title: "Request rejected",
+      body: err.detail ?? `The classifier returned ${err.status}.`,
+    };
+  }
+  if (err instanceof Error) return { title: "Error", body: err.message };
+  return { title: "Error", body: "An unknown error occurred." };
+}
 
 export default function ClassifierPage() {
   const [logChunk, setLogChunk] = useState<string>("");
@@ -115,11 +146,11 @@ export default function ClassifierPage() {
                 </div>
               )}
               {mutation.isError && (
-                <Alert variant="destructive">
+                <Alert variant="destructive" data-testid="classify-error">
                   <Terminal className="h-4 w-4" />
-                  <AlertTitle>Error</AlertTitle>
+                  <AlertTitle>{describeError(mutation.error).title}</AlertTitle>
                   <AlertDescription>
-                    {mutation.error.message}
+                    {describeError(mutation.error).body}
                     <Button
                       variant="link"
                       onClick={handleClassify}
