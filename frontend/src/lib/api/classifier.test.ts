@@ -8,6 +8,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import {
   classify,
+  generateLogs,
   getClassifierHealth,
   ClassifierHttpError,
   ClassifierNetworkError,
@@ -167,6 +168,80 @@ describe("classifier API client", () => {
       fetchSpy.mockRejectedValueOnce(new TypeError("ECONNREFUSED"));
 
       await expect(getClassifierHealth()).rejects.toBeInstanceOf(
+        ClassifierNetworkError,
+      );
+    });
+  });
+
+  describe("generateLogs()", () => {
+    const GEN_BODY = {
+      log_chunk: "2024-01-01 ERROR something broke",
+      intended_severity: "ERROR" as const,
+      num_lines: 1,
+    };
+
+    it("POSTs the request body to /generate-logs and returns the parsed body", async () => {
+      fetchSpy.mockResolvedValueOnce(jsonResponse(GEN_BODY));
+
+      const result = await generateLogs({
+        profile: "error",
+        num_lines: 1,
+        seed: 42,
+      });
+
+      expect(result).toEqual(GEN_BODY);
+      const [url, init] = fetchSpy.mock.calls[0]!;
+      expect(url).toBe(`${__test__.CLASSIFIER_URL}/generate-logs`);
+      expect(init?.method).toBe("POST");
+      expect(JSON.parse(String(init?.body))).toEqual({
+        profile: "error",
+        num_lines: 1,
+        seed: 42,
+      });
+    });
+
+    it("works with no arguments (backend defaults apply)", async () => {
+      fetchSpy.mockResolvedValueOnce(jsonResponse(GEN_BODY));
+
+      await generateLogs();
+
+      const [, init] = fetchSpy.mock.calls[0]!;
+      expect(JSON.parse(String(init?.body))).toEqual({});
+    });
+
+    it("forwards the AbortSignal", async () => {
+      fetchSpy.mockResolvedValueOnce(jsonResponse(GEN_BODY));
+      const controller = new AbortController();
+
+      await generateLogs({ profile: "fatal" }, controller.signal);
+
+      const [, init] = fetchSpy.mock.calls[0]!;
+      expect(init?.signal).toBe(controller.signal);
+    });
+
+    it("throws ClassifierHttpError(400) with detail when backend rejects", async () => {
+      fetchSpy.mockResolvedValueOnce(
+        jsonResponse(
+          { detail: "num_lines must be between 1 and 200" },
+          { status: 400 },
+        ),
+      );
+
+      const err = await generateLogs({ num_lines: 9999 }).catch(
+        (e: unknown) => e,
+      );
+
+      expect(err).toBeInstanceOf(ClassifierHttpError);
+      expect((err as ClassifierHttpError).status).toBe(400);
+      expect((err as ClassifierHttpError).detail).toContain(
+        "num_lines must be between",
+      );
+    });
+
+    it("throws ClassifierNetworkError when fetch rejects", async () => {
+      fetchSpy.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+
+      await expect(generateLogs()).rejects.toBeInstanceOf(
         ClassifierNetworkError,
       );
     });

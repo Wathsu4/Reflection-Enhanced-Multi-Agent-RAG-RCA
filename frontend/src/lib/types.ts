@@ -1,5 +1,30 @@
 export type Severity = "FATAL_OR_CRITICAL" | "ERROR" | "WARNING" | "NORMAL";
 export type Priority = "critical" | "high" | "low" | "none";
+export type Profile = "normal" | "warning" | "error" | "fatal" | "mixed";
+
+export interface GenerateLogsRequest {
+  profile?: Profile;
+  num_lines?: number;
+  seed?: number;
+}
+
+/**
+ * One row in the simulator's event feed. Lifecycle:
+ * 1. Created with `status: "pending"` immediately after a chunk is generated.
+ * 2. If auto-classify is on, transitions to `"classified"` (with `classification`
+ *    populated) or `"error"` (with `classifyError` populated).
+ * 3. If auto-classify is off, stays `"pending"` indefinitely.
+ */
+export interface SimEvent {
+  id: string;
+  timestamp: number;
+  intendedSeverity: Severity;
+  chunkText: string;
+  numLines: number;
+  classification: ClassifyResponse | null;
+  classifyError: string | null;
+  status: "pending" | "classified" | "error";
+}
 
 export interface ClassifyResponse {
   severity: Severity;

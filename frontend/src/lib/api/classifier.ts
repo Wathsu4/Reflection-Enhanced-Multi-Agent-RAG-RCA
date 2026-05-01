@@ -1,4 +1,9 @@
-import type { ClassifyResponse } from "@/lib/types";
+import type {
+  ClassifyResponse,
+  GenerateLogsRequest,
+  GenerateLogsResponse,
+  Severity,
+} from "@/lib/types";
 
 /**
  * Resolves the base URL of the classifier service.
@@ -113,6 +118,19 @@ export async function getClassifierHealth(
   });
 }
 
+export async function generateLogs(
+  req: GenerateLogsRequest = {},
+  signal?: AbortSignal,
+): Promise<GenerateLogsResponse> {
+  if (USE_MOCK) return mockGenerateLogs(req);
+  return jsonFetch<GenerateLogsResponse>(`${CLASSIFIER_URL}/generate-logs`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+    signal,
+  });
+}
+
 // Exposed so tests can pin behavior even when devs override env vars locally.
 export const __test__ = {
   CLASSIFIER_URL,
@@ -164,6 +182,72 @@ function mockClassify(chunk: string): Promise<ClassifyResponse> {
           all_probabilities: probs,
         }),
       400 + Math.random() * 400,
+    ),
+  );
+}
+
+const MOCK_TEMPLATES: Record<Severity, string[]> = {
+  NORMAL: [
+    "INFO  HTTP 200 GET /api/health",
+    "INFO  Cache hit ratio: 92.4%",
+    "DEBUG Connection pool: 12/50 active",
+    "INFO  HTTP 200 POST /api/orders/{id}",
+  ],
+  WARNING: [
+    "WARN  Slow query (1.2s): SELECT * FROM events WHERE ...",
+    "WARN  Deprecated endpoint /v1/users hit 14 times in last 5m",
+    "WARN  Retry attempt 2/3 for upstream 'inventory'",
+  ],
+  ERROR: [
+    "ERROR HTTP 500 POST /api/orders \u2014 IntegrityError",
+    "ERROR Pod OOMKilled: order-processor exceeded memory limit",
+    "ERROR Connection refused to redis://10.0.1.100:6379",
+  ],
+  FATAL_OR_CRITICAL: [
+    "FATAL Cascading failure: 10 dependent services unreachable",
+    "FATAL Unrecoverable database corruption detected",
+    "FATAL Out of memory \u2014 process killed by OOM killer",
+  ],
+};
+
+function mockGenerateLogs(
+  req: GenerateLogsRequest,
+): Promise<GenerateLogsResponse> {
+  const profile = req.profile ?? "mixed";
+  const numLines = req.num_lines ?? 10;
+  // Pick a target severity from the profile.
+  let intended: Severity = "NORMAL";
+  if (profile === "fatal") intended = "FATAL_OR_CRITICAL";
+  else if (profile === "error") intended = "ERROR";
+  else if (profile === "warning") intended = "WARNING";
+  else if (profile === "normal") intended = "NORMAL";
+  else {
+    // mixed \u2014 weighted random
+    const r = Math.random();
+    if (r < 0.05) intended = "FATAL_OR_CRITICAL";
+    else if (r < 0.25) intended = "ERROR";
+    else if (r < 0.45) intended = "WARNING";
+    else intended = "NORMAL";
+  }
+  const pool = MOCK_TEMPLATES[intended];
+  const lines: string[] = [];
+  const now = new Date();
+  for (let i = 0; i < numLines; i++) {
+    const ts = new Date(now.getTime() + i * 1000)
+      .toISOString()
+      .slice(0, 19)
+      .replace("T", " ");
+    lines.push(`${ts} ${pool[i % pool.length]}`);
+  }
+  return new Promise((r) =>
+    setTimeout(
+      () =>
+        r({
+          log_chunk: lines.join("\n"),
+          intended_severity: intended,
+          num_lines: numLines,
+        }),
+      150 + Math.random() * 150,
     ),
   );
 }
