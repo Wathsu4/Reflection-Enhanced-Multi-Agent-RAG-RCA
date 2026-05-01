@@ -31,10 +31,27 @@ Default port: `8000` (ADK convention).
 
 ## Quick start (once implemented)
 
+**Mac / Linux**
+
 ```bash
 cd rca-agent-system
-uv sync                          # or: pip install -e .
-cp .env.example .env             # set GOOGLE_API_KEY
-python scripts/seed_knowledge_base.py
-adk web                          # or: uvicorn rca_system.server:app --port 8000
+uv sync --extra dev
+cp .env.example .env             # then edit to set GOOGLE_API_KEY
+uv run python scripts/seed_knowledge_base.py
+uv run adk web                   # or: uv run python server.py
 ```
+
+**Windows (PowerShell)**
+
+```powershell
+cd rca-agent-system
+uv sync --extra dev
+Copy-Item .env.example .env      # then edit to set GOOGLE_API_KEY
+uv run python scripts\seed_knowledge_base.py
+uv run adk web                   # or: uv run python server.py
+```
+
+`uv` works identically on all platforms; only the `cp`/`Copy-Item` and path
+separators differ. If you don't have `uv`, replace `uv run` with activating
+a venv first (`source .venv/bin/activate` on Mac/Linux,
+`.\.venv\Scripts\Activate.ps1` on Windows).

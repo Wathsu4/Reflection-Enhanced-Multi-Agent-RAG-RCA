@@ -1,0 +1,66 @@
+# Normalize line endings on commit; check out with native endings.
+# Prevents CRLF-vs-LF merge noise when collaborators on Windows clone the repo.
+* text=auto eol=lf
+
+# Source files — always LF, regardless of host OS.
+*.py        text eol=lf
+*.ts        text eol=lf
+*.tsx       text eol=lf
+*.js        text eol=lf
+*.jsx       text eol=lf
+*.mjs       text eol=lf
+*.cjs       text eol=lf
+*.json      text eol=lf
+*.jsonc     text eol=lf
+*.md        text eol=lf
+*.mdx       text eol=lf
+*.yaml      text eol=lf
+*.yml       text eol=lf
+*.toml      text eol=lf
+*.cfg       text eol=lf
+*.ini       text eol=lf
+*.sh        text eol=lf
+*.css       text eol=lf
+*.scss      text eol=lf
+*.html      text eol=lf
+*.svg       text eol=lf
+*.example   text eol=lf
+.gitignore  text eol=lf
+.gitattributes text eol=lf
+.env*       text eol=lf
+Dockerfile  text eol=lf
+
+# Windows-only files keep CRLF.
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+*.ps1       text eol=crlf
+
+# Binary assets — never touched.
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.webp      binary
+*.pdf       binary
+*.zip       binary
+*.tar       binary
+*.gz        binary
+*.bin       binary
+*.safetensors binary
+*.pt        binary
+*.pth       binary
+*.onnx      binary
+*.parquet   binary
+*.db        binary
+*.sqlite    binary
+*.sqlite3   binary
+
+# Notebooks: treat as text so GitHub renders diffs, but pin LF.
+*.ipynb     text eol=lf
+
+# Lockfiles — generated, prefer not to manually edit.
+pnpm-lock.yaml -diff
+uv.lock        -diff
+package-lock.json -diff
+yarn.lock      -diff
