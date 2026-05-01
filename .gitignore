@@ -1,32 +1,31 @@
-   # Python
-   __pycache__/
-   *.py[cod]
-   .venv/
-   venv/
-   .env
-   *.egg-info/
-   .pytest_cache/
-   .ruff_cache/
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
 
-   # Node
-   node_modules/
-   .next/
-   out/
-   .turbo/
-   *.tsbuildinfo
+# Node
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
 
-   # ML / data
-   classifier-service/models/
-   rca-agent-system/data/
-   rca-agent-system/**/sessions.db
+# ML / data
+classifier-service/models/
+rca-agent-system/data/
+rca-agent-system/**/sessions.db
 
-   # IDE / OS
-   .vscode/
-   .idea/
-   .DS_Store
-   Thumbs.db
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
 
-   # Env
-   .env
-   .env.local
-   .env.*.local
+# Env
+.env
+.env.local
+.env.*.local
