@@ -31,6 +31,11 @@ export interface SimulatorControlsProps {
   onStop: () => void;
   onClear: () => void;
   onChange: (overrides: Partial<SimulatorOptions>) => void;
+  // Phase 9: auto-RCA toggle. Lives here rather than in the simulator
+  // hook because the agent service (not the classifier) is the
+  // resource being gated.
+  autoRcaEnabled: boolean;
+  onAutoRcaChange: (enabled: boolean) => void;
 }
 
 export function SimulatorControls({
@@ -41,6 +46,8 @@ export function SimulatorControls({
   onStop,
   onClear,
   onChange,
+  autoRcaEnabled,
+  onAutoRcaChange,
 }: SimulatorControlsProps) {
   return (
     <Card data-testid="simulator-controls">
@@ -133,6 +140,25 @@ export function SimulatorControls({
             checked={options.autoClassify}
             onCheckedChange={(c) => onChange({ autoClassify: c })}
             data-testid="auto-classify-switch"
+          />
+        </div>
+
+        <div className="flex items-center justify-between rounded-md border p-3">
+          <div className="space-y-0.5">
+            <Label htmlFor="auto-rca" className="text-sm">
+              Auto-RCA
+            </Label>
+            <p className="text-xs text-muted-foreground">
+              Trigger the agent pipeline whenever the classifier flags a
+              chunk as ERROR/FATAL. Turning this off cancels any pending
+              investigations.
+            </p>
+          </div>
+          <Switch
+            id="auto-rca"
+            checked={autoRcaEnabled}
+            onCheckedChange={onAutoRcaChange}
+            data-testid="auto-rca-switch"
           />
         </div>
 

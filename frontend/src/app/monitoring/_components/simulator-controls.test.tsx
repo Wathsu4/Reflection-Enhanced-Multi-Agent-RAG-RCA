@@ -21,6 +21,8 @@ function renderControls(
     onStop: vi.fn(),
     onClear: vi.fn(),
     onChange: vi.fn(),
+    autoRcaEnabled: true,
+    onAutoRcaChange: vi.fn(),
     ...overrides,
   };
   render(<SimulatorControls {...props} />);
@@ -93,5 +95,18 @@ describe("<SimulatorControls />", () => {
     fireEvent.change(slider, { target: { value: "25" } });
 
     expect(props.onChange).toHaveBeenCalledWith({ numLines: 25 });
+  });
+
+  it("renders the Auto-RCA toggle reflecting the current value", () => {
+    renderControls({ autoRcaEnabled: false });
+    const sw = screen.getByTestId("auto-rca-switch");
+    expect(sw).toHaveAttribute("data-state", "unchecked");
+  });
+
+  it("emits onAutoRcaChange when the Auto-RCA toggle is flipped", async () => {
+    const user = userEvent.setup();
+    const props = renderControls({ autoRcaEnabled: true });
+    await user.click(screen.getByTestId("auto-rca-switch"));
+    expect(props.onAutoRcaChange).toHaveBeenCalledWith(false);
   });
 });

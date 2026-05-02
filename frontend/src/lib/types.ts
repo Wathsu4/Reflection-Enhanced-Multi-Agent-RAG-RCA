@@ -117,6 +117,38 @@ export interface AgentToolInvocation {
   response?: unknown;
 }
 
+/**
+ * One automated RCA run launched by the simulator.
+ *
+ * Phase 9 introduces this. The shape mirrors `useAgentStream`'s result
+ * but adds queue-status fields (`status`, `triggeredBy`, `chunk`) so
+ * the simulator can render an investigations list independently of any
+ * single live stream. The `events` array is the raw ADK event log we
+ * later aggregate via `aggregateEvents` -- keeping it raw makes the
+ * type cheap to serialize / replay.
+ */
+export interface Investigation {
+  /** Same id used as ADK session id. */
+  id: string;
+  /** Id of the SimEvent (classification row) that triggered this RCA. */
+  triggeredBy: string;
+  /** Browser epoch ms when this Investigation entered the queue. */
+  startedAt: number;
+  /** Browser epoch ms when streaming finished, or null if not done. */
+  completedAt: number | null;
+  status: "queued" | "running" | "done" | "error";
+  /** Raw ADK SSE events received so far (capped at 500 to bound memory). */
+  events: AdkEvent[];
+  /** The original log chunk that triggered the run. */
+  chunk: string;
+  /** Severity classified by the classifier upstream. */
+  severity: Severity;
+  /** Final markdown from `memory_update_agent` (output_key=final_output). */
+  finalAnswer: string | null;
+  /** Friendly error message when status is "error". */
+  error: string | null;
+}
+
 /** All events from one sub-agent in one run, aggregated. */
 export interface AgentRunGroup {
   /** Sub-agent name; matches `event.author`. */

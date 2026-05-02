@@ -19,10 +19,11 @@ or for the ADK web UI (debugging):
 from __future__ import annotations
 
 import importlib
+import os
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from google.adk.cli.fast_api import get_fast_api_app
 
 from rca_system.settings import settings
@@ -92,6 +93,44 @@ async def list_apps() -> list[str]:
         if p.is_dir() and not p.name.startswith((".", "_"))
     ]
     return sorted(c for c in candidates if _is_real_agent_app(c))
+
+
+@app.post("/demo/reset-memory", tags=["demo"])
+async def reset_memory() -> dict[str, object]:
+    """Wipe and re-seed ChromaDB. Phase 9 demo helper.
+
+    GUARD: only enabled when `ALLOW_DEMO_RESET=1` is set in the env --
+    resetting the dynamic memory between unrelated production runs
+    would erase the reflection-driven score adjustments we want to
+    measure, so this is deliberately not a default-on endpoint.
+
+    The implementation imports `scripts.reset_memory.reset_memory` and
+    calls it directly rather than spawning a subprocess: it's already
+    correct (clears chromadb's process-wide cache before rmtree, then
+    reseeds), and avoiding `subprocess` keeps the runtime serverless-
+    friendly.
+    """
+    if os.getenv("ALLOW_DEMO_RESET") != "1":
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Demo reset is disabled. Set ALLOW_DEMO_RESET=1 in the "
+                "agent service environment to enable this endpoint."
+            ),
+        )
+    # Local import: keeps server cold-start fast when the endpoint
+    # isn't exercised, and avoids loading the chromadb client until
+    # the user actually asks for a reset.
+    from scripts.reset_memory import reset_memory as _reset
+    from rca_system.memory.chroma_store import IncidentMemory
+
+    rc = _reset()
+    if rc != 0:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Reset/reseed exited with code {rc}",
+        )
+    return {"status": "ok", "count": IncidentMemory().count()}
 
 
 if __name__ == "__main__":

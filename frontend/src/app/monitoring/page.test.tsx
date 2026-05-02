@@ -9,6 +9,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 const useLogSimulatorMock = vi.hoisted(() => vi.fn());
+const useInvestigationsQueueMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/hooks/useLogSimulator", () => ({
   useLogSimulator: useLogSimulatorMock,
@@ -19,6 +20,13 @@ vi.mock("@/lib/hooks/useLogSimulator", () => ({
     autoClassify: true,
     maxEvents: 50,
   },
+}));
+
+// The queue hook is fully exercised in its own test file; for the
+// page test we want a deterministic empty-queue stub so that the
+// "auto-flip to Investigations tab" effect doesn't kick in mid-test.
+vi.mock("@/lib/hooks/useInvestigationsQueue", () => ({
+  useInvestigationsQueue: useInvestigationsQueueMock,
 }));
 
 import MonitoringPage from "./page";
@@ -44,6 +52,11 @@ const baseSim = () => ({
 describe("<MonitoringPage />", () => {
   beforeEach(() => {
     useLogSimulatorMock.mockReset();
+    useInvestigationsQueueMock.mockReset();
+    useInvestigationsQueueMock.mockReturnValue({
+      investigations: [],
+      clear: vi.fn(),
+    });
   });
 
   it("renders the empty feed and the Start button when stopped", () => {

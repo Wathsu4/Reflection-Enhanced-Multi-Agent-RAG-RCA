@@ -57,3 +57,24 @@ def test_session_endpoint_path_template_exists() -> None:
     assert (
         "/apps/{app_name}/users/{user_id}/sessions/{session_id}" in paths
     )
+
+
+# -------------------- Phase 9 demo reset --------------------
+
+
+def test_reset_memory_returns_403_when_flag_is_unset(monkeypatch) -> None:
+    """The demo reset is destructive; it must refuse to run unless the
+    operator explicitly enables it. Default-deny is the only safe
+    default for an LLM-facing endpoint."""
+    monkeypatch.delenv("ALLOW_DEMO_RESET", raising=False)
+    r = client.post("/demo/reset-memory")
+    assert r.status_code == 403
+    assert "ALLOW_DEMO_RESET" in r.json()["detail"]
+
+
+def test_reset_memory_route_is_mounted() -> None:
+    """We don't actually run the destructive path in CI (it would wipe
+    the dev's chroma dir). Just assert the endpoint is registered so a
+    refactor that accidentally drops it fails this test fast."""
+    paths = {r.path for r in server.app.routes if hasattr(r, "path")}
+    assert "/demo/reset-memory" in paths
