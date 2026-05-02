@@ -93,13 +93,25 @@ describe("useLogSimulator", () => {
     act(() => result.current.start({ intervalMs: 20 }));
 
     await waitFor(() => expect(result.current.events.length).toBeGreaterThanOrEqual(2));
-    expect(generateLogsMock).toHaveBeenCalledTimes(
-      result.current.events.length,
-    );
-    // Newest event is at index 0.
-    expect(result.current.latest).toBe(result.current.events[0]);
 
+    // Stop before snapshotting. On slow machines (Windows i3) a tick
+    // can fire between waitFor settling and the assertions below,
+    // bumping the call count past events.length and producing a
+    // spurious failure. Stopping freezes the schedule.
     act(() => result.current.stop());
+
+    const events = result.current.events;
+    expect(events.length).toBeGreaterThanOrEqual(2);
+    // Each event corresponds to exactly one generateLogs call. The
+    // loop may have a tick in flight at stop() time that incremented
+    // the call count without producing an event yet, so allow
+    // off-by-one in the upper bound.
+    const calls = generateLogsMock.mock.calls.length;
+    expect(calls).toBeGreaterThanOrEqual(events.length);
+    expect(calls).toBeLessThanOrEqual(events.length + 1);
+    // Newest event is at index 0.
+    expect(result.current.latest).toBe(events[0]);
+
     unmount();
   });
 
