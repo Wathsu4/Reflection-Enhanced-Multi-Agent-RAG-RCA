@@ -42,20 +42,96 @@ export interface GenerateLogsResponse {
   num_lines: number;
 }
 
-// ADK event (partial — only fields we care about)
+// -------------------- ADK event types --------------------
+//
+// These mirror the wire shape of `/run_sse` events as emitted by Google
+// ADK 1.32.x. Field names are camelCase (NOT snake_case as a previous
+// version of this file incorrectly assumed) and verified empirically
+// against a live pipeline run.
+//
+// We only declare the fields we actually consume; ADK adds many others
+// (thoughtSignature, usageMetadata, modelVersion, ...) that we don't
+// care about, and we deliberately don't list them so the type stays
+// trim and forward-compatible.
+
+export interface AdkFunctionCall {
+  /** Stable id correlating a call to its later response event. */
+  id?: string;
+  name: string;
+  args: Record<string, unknown>;
+}
+
+export interface AdkFunctionResponse {
+  id?: string;
+  name: string;
+  response: unknown;
+}
+
+export interface AdkEventPart {
+  text?: string;
+  functionCall?: AdkFunctionCall;
+  functionResponse?: AdkFunctionResponse;
+}
+
+export interface AdkEventActions {
+  /**
+   * When an Agent declares `output_key="foo"`, ADK writes
+   * `session.state["foo"]` at the end of that agent's turn and surfaces
+   * the write here. We use this as the authoritative "this agent just
+   * finished" signal in the timeline.
+   */
+  stateDelta?: Record<string, unknown>;
+}
+
 export interface AdkEvent {
   id: string;
-  author: string; // agent name
+  /** The sub-agent that produced this event (e.g. `retrieval_agent`). */
+  author: string;
+  /** Unix epoch seconds (float). */
   timestamp: number;
+  /**
+   * Streaming chunk flag. When `true`, this event carries a partial
+   * fragment of the agent's text and SHOULD be concatenated with later
+   * partials sharing the same author until a non-partial event closes
+   * the turn.
+   */
+  partial?: boolean;
+  /** Single-message-per-turn invocation context for the whole pipeline. */
+  invocationId?: string;
   content?: {
-    parts: Array<{
-      text?: string;
-      function_call?: { name: string; args: Record<string, unknown> };
-      function_response?: { name: string; response: unknown };
-    }>;
+    parts: AdkEventPart[];
     role: "user" | "model";
   };
-  actions?: Record<string, unknown>;
+  actions?: AdkEventActions;
+}
+
+// -------------------- Aggregated view types --------------------
+// Derived shapes our hooks produce from a raw event stream. Keeping
+// them here means components don't need to know the wire format.
+
+/** A single tool invocation (call + matching response, by id when available). */
+export interface AgentToolInvocation {
+  callId: string;
+  name: string;
+  args: Record<string, unknown>;
+  response?: unknown;
+}
+
+/** All events from one sub-agent in one run, aggregated. */
+export interface AgentRunGroup {
+  /** Sub-agent name; matches `event.author`. */
+  author: string;
+  /** Concatenation of every text part across the partial chunks + final. */
+  text: string;
+  /** Tool calls + responses, in arrival order. */
+  toolInvocations: AgentToolInvocation[];
+  /** Truthy once a non-partial event closes the turn (or `stateDelta` fires). */
+  isComplete: boolean;
+  /** Any `output_key` writes captured from this agent's actions.stateDelta. */
+  stateWrites: Record<string, unknown>;
+  /** First and last event timestamps (epoch seconds). */
+  firstTs: number;
+  lastTs: number;
 }
 
 export const SEVERITY_ORDER: Severity[] = [
