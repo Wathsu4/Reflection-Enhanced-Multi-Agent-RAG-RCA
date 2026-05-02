@@ -167,17 +167,11 @@ def _render_report(
 
 async def amain(args: argparse.Namespace) -> int:
     if not args.skip_reset:
-        from chromadb.api.client import SharedSystemClient
-        import shutil
-        from rca_system.settings import settings as agent_settings
-        from scripts.seed_knowledge_base import main as seed_main
+        # Delegate to the production reset script -- it handles the
+        # chromadb cache + Windows mmap-handle release correctly.
+        from scripts.reset_memory import reset_memory
 
-        target = Path(agent_settings.chroma_persist_dir)
-        if target.exists():
-            SharedSystemClient.clear_system_cache()
-            shutil.rmtree(target)
-            print(f"removed {target}", file=sys.stderr)
-        rc = seed_main([])
+        rc = reset_memory()
         if rc != 0:
             print("seeder failed; aborting", file=sys.stderr)
             return 1
