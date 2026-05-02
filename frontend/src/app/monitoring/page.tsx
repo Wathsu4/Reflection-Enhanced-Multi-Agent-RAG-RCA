@@ -6,6 +6,7 @@ import type { SimEvent } from "@/lib/types";
 import { SimulatorControls } from "./_components/simulator-controls";
 import { EventFeed } from "./_components/event-feed";
 import { LatestEventCard } from "./_components/latest-event-card";
+import { SummaryStats } from "./_components/summary-stats";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Terminal } from "lucide-react";
 
@@ -45,6 +46,8 @@ export default function MonitoringPage() {
           </AlertDescription>
         </Alert>
       )}
+
+      <SummaryStats events={sim.events} />
 
       <div className="grid flex-1 grid-cols-1 gap-4 lg:grid-cols-[280px_1fr_1fr]">
         <SimulatorControls

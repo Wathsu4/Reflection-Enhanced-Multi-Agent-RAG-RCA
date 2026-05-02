@@ -93,4 +93,59 @@ describe("<EventFeed />", () => {
     await user.click(rows[1]!);
     expect(onSelect).toHaveBeenCalledWith(events[1]);
   });
+
+  it("shows the mismatch indicator only when classified severity differs from intended", () => {
+    const matched: SimEvent = makeEvent({
+      id: "evt-match",
+      intendedSeverity: "ERROR",
+      status: "classified",
+      classification: {
+        severity: "ERROR",
+        severity_id: 1,
+        confidence: 0.9,
+        should_invoke_rca: true,
+        priority: "high",
+        inference_ms: 30,
+        all_probabilities: {
+          FATAL_OR_CRITICAL: 0.05,
+          ERROR: 0.9,
+          WARNING: 0.03,
+          NORMAL: 0.02,
+        },
+      },
+    });
+    const mismatched: SimEvent = makeEvent({
+      id: "evt-mismatch",
+      intendedSeverity: "ERROR",
+      status: "classified",
+      classification: {
+        severity: "WARNING",
+        severity_id: 2,
+        confidence: 0.7,
+        should_invoke_rca: false,
+        priority: "low",
+        inference_ms: 30,
+        all_probabilities: {
+          FATAL_OR_CRITICAL: 0.05,
+          ERROR: 0.2,
+          WARNING: 0.7,
+          NORMAL: 0.05,
+        },
+      },
+    });
+
+    render(<EventFeed events={[matched, mismatched]} />);
+
+    const rows = screen.getAllByTestId("event-feed-row");
+    expect(rows[0]!.getAttribute("data-mismatch")).toBe("false");
+    expect(rows[1]!.getAttribute("data-mismatch")).toBe("true");
+
+    // Exactly one mismatch icon visible across the feed.
+    expect(screen.getAllByTestId("mismatch-indicator")).toHaveLength(1);
+  });
+
+  it("does not show the mismatch indicator on pending events", () => {
+    render(<EventFeed events={[makeEvent({ status: "pending" })]} />);
+    expect(screen.queryByTestId("mismatch-indicator")).not.toBeInTheDocument();
+  });
 });

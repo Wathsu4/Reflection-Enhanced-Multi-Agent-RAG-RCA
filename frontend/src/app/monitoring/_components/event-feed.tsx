@@ -46,6 +46,13 @@ export function EventFeed({ events, selectedId, onSelect }: EventFeedProps) {
                 const sev =
                   event.classification?.severity ?? event.intendedSeverity;
                 const isSelected = event.id === selectedId;
+                // True only when classification is back AND it disagrees
+                // with the generator's intended severity. Surfaces both
+                // classifier mistakes and weak templates during the demo.
+                const isMismatch =
+                  event.status === "classified" &&
+                  event.classification !== null &&
+                  event.classification.severity !== event.intendedSeverity;
                 return (
                   <li
                     key={event.id}
@@ -58,6 +65,7 @@ export function EventFeed({ events, selectedId, onSelect }: EventFeedProps) {
                     data-event-id={event.id}
                     data-status={event.status}
                     data-selected={isSelected ? "true" : "false"}
+                    data-mismatch={isMismatch ? "true" : "false"}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
@@ -76,6 +84,13 @@ export function EventFeed({ events, selectedId, onSelect }: EventFeedProps) {
                           <AlertTriangle
                             className="h-3 w-3 text-destructive"
                             aria-label="classification failed"
+                          />
+                        )}
+                        {isMismatch && (
+                          <AlertTriangle
+                            className="h-3 w-3 text-yellow-500"
+                            aria-label={`intended ${event.intendedSeverity}, predicted ${event.classification!.severity}`}
+                            data-testid="mismatch-indicator"
                           />
                         )}
                       </div>
