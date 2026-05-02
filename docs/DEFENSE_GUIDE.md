@@ -152,12 +152,17 @@ Run each block from the **repo root**. `uv sync` will create a
 `.venv` *inside* each sub-project automatically; you don't need to
 `python -m venv` or `Activate.ps1` yourself.
 
+> **Use `--extra dev` for both Python sub-projects.** It pulls in
+> `pytest` (needed for the validation step below) along with `ruff`
+> and `pyright`. Skipping it gives you `error: Failed to spawn:
+> pytest, Caused by: program not found` when you try to run tests.
+
 **PowerShell (one command per line — `&&` chaining is PowerShell 7
 only and unreliable on default Windows installs):**
 
 ```powershell
 cd classifier-service
-uv sync
+uv sync --extra dev
 cd ..
 
 cd rca-agent-system
@@ -172,7 +177,7 @@ cd ..
 **Git Bash (or PowerShell 7+) — same thing as a one-liner per project:**
 
 ```bash
-cd classifier-service && uv sync && cd ..
+cd classifier-service && uv sync --extra dev && cd ..
 cd rca-agent-system && uv sync --extra dev && cd ..
 cd frontend && pnpm install && cd ..
 ```
@@ -882,6 +887,30 @@ shell to register the global binary.
 **Fix:** Close and reopen the terminal. If still missing, the
 PowerShell installer added uv to `$env:USERPROFILE\.local\bin` —
 verify it exists and add it to PATH manually if needed.
+
+### `uv run pytest` → `Failed to spawn: pytest, Caused by: program not found`
+
+**Cause:** you ran `uv sync` without `--extra dev`, so the dev tools
+(`pytest`, `ruff`, `pyright`) weren't installed.
+
+**Fix:** Re-sync with the extra:
+```powershell
+# In whichever sub-project you're testing
+uv sync --extra dev
+uv run pytest -q
+```
+
+This applies to both `classifier-service` and `rca-agent-system`.
+
+### Tests look like they're stuck on a model download
+
+**Cause:** the classifier-service tests instantiate the ModernBERT
+model on first run, which can take 30-60s on an i3 from a cold disk
+cache. Same for rca-agent-system tests, which load ChromaDB's
+embedding model (~90 MB) on first run only.
+
+**Fix:** Wait. Run the tests once during setup so the cache is warm
+before you ever run them under time pressure on defense day.
 
 ---
 
