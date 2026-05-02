@@ -40,7 +40,7 @@ retraining anything.
 | [`classifier-service/`](./classifier-service/README.md) | FastAPI on `:8001` wrapping the fine-tuned ModernBERT classifier. |
 | [`rca-agent-system/`](./rca-agent-system/README.md) | Google ADK pipeline on `:8000`, ChromaDB knowledge base, evaluation tooling. |
 | [`frontend/`](./frontend/README.md) | Next.js 16 app on `:3000` (classifier UI, agent explorer, simulator with auto-RCA, history replay). |
-| [`docs/`](./docs/) | Demo runbook (`DEMO.md`), research-question coverage matrix (`RESEARCH_QUESTIONS.md`), screenshots placeholder. |
+| [`docs/`](./docs/) | Defense bible (`DEFENSE_GUIDE.md`), demo runbook (`DEMO.md`), research-question coverage matrix (`RESEARCH_QUESTIONS.md`), screenshots placeholder. |
 | [`PROJECT_IMPLEMENTATION_GUIDE.md`](./PROJECT_IMPLEMENTATION_GUIDE.md) | Phase-by-phase implementation plan that this codebase follows. |
 
 ## Quick start
