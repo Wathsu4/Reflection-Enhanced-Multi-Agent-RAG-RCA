@@ -20,9 +20,11 @@ dependencies = [
     # Config
     "pydantic-settings>=2.0",
     "python-dotenv>=1.0",
-    # Vector store (used in Phase 6; install now to keep one lockfile)
+    # Vector store (Phase 6+).
     "chromadb>=0.5",
     "sentence-transformers>=3.0",
+    # YAML frontmatter parsing for seed/*.md files.
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
