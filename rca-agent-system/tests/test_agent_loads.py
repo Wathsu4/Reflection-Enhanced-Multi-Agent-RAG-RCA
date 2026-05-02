@@ -33,9 +33,20 @@ def test_root_agent_uses_settings_model() -> None:
         assert direct.model == settings.gemini_model
 
 
-def test_root_agent_has_a_nonempty_instruction() -> None:
-    # ADK accepts `instruction` as a string OR a callable. We use the
-    # string form; this just guards against accidental empty prompts.
-    instruction = direct.instruction
-    assert isinstance(instruction, str)
-    assert len(instruction.strip()) > 50
+def test_root_agent_has_a_nonempty_description() -> None:
+    """Every agent (including SequentialAgent orchestrators) has a
+    description -- it's how Gemini decides whether to delegate to a
+    sub-agent in hierarchical setups, and how `adk web` labels the
+    pipeline. An empty description silently degrades both."""
+    assert isinstance(direct.description, str)
+    assert len(direct.description.strip()) > 30
+
+
+def test_llm_root_agent_has_a_nonempty_instruction() -> None:
+    """Phase 5 / Phase 6: root_agent was an LLM `Agent`; instruction
+    must be present. Phase 7: root_agent is a SequentialAgent which
+    has no `instruction` field at all -- skip the check."""
+    if hasattr(direct, "instruction"):
+        instruction = direct.instruction
+        assert isinstance(instruction, str)
+        assert len(instruction.strip()) > 50

@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
+import rca_system.tools.retrieve_incidents as ri_module
 from rca_system.memory.chroma_store import IncidentMemory, IncidentRecord
-from rca_system.tools import retrieve_incidents as ri_module
 from tests._fake_embed import FakeEmbeddingFunction
 
 
