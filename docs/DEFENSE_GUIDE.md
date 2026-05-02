@@ -104,34 +104,105 @@ Get it sorted before continuing.
 
 ## 2.3 — Clone and install
 
-Open **Git Bash**:
+> **THIS IS A MONOREPO — there is no `pyproject.toml` at the repo
+> root.** Each of `classifier-service/`, `rca-agent-system/`, and
+> `frontend/` is its own project with its own dependencies. **Never
+> run `uv sync` or `pip install` at the repo root** — you'll get
+> `error: No pyproject.toml found`. Always `cd` into a sub-project
+> first.
 
+> **Avoid paths with spaces** if you can (e.g. `Research Project`).
+> Most tools handle them, but a few break in subtle ways on Windows.
+> Either rename the parent folder or use a path like `C:\projects\...`.
+> If you must use a path with spaces, the commands below still work
+> as long as you `cd` from the prompt (PowerShell handles the
+> quoting for you).
+
+> **Avoid OneDrive / Dropbox folders.** They intercept file writes
+> and break virtual-environment resolution on Windows.
+
+### Clone
+
+Open a terminal (**Git Bash** preferred for the demo, but
+**PowerShell** is fine for installation).
+
+**Git Bash:**
 ```bash
-# Avoid OneDrive / Dropbox folders — they break venv resolution on Windows.
-cd /c/projects   # or wherever
+cd /c/projects     # or wherever you want it
 git clone https://github.com/Wathsu4/Reflection-Enhanced-Multi-Agent-RAG-RCA.git
 cd Reflection-Enhanced-Multi-Agent-RAG-RCA
 ```
 
-Drop the model directory you copied in step 2.2 into
-`classifier-service/models/modernbert-log-severity-v1/`.
+**PowerShell:**
+```powershell
+cd C:\projects     # or wherever you want it
+git clone https://github.com/Wathsu4/Reflection-Enhanced-Multi-Agent-RAG-RCA.git
+cd Reflection-Enhanced-Multi-Agent-RAG-RCA
+```
 
-Install all three sub-projects (5-15 min):
+Drop the model directory you copied in step 2.2 into:
+
+```
+classifier-service\models\modernbert-log-severity-v1\
+```
+
+### Install — three sub-projects, run in order (5-15 min)
+
+Run each block from the **repo root**. `uv sync` will create a
+`.venv` *inside* each sub-project automatically; you don't need to
+`python -m venv` or `Activate.ps1` yourself.
+
+**PowerShell (one command per line — `&&` chaining is PowerShell 7
+only and unreliable on default Windows installs):**
+
+```powershell
+cd classifier-service
+uv sync
+cd ..
+
+cd rca-agent-system
+uv sync --extra dev
+cd ..
+
+cd frontend
+pnpm install
+cd ..
+```
+
+**Git Bash (or PowerShell 7+) — same thing as a one-liner per project:**
 
 ```bash
-cd frontend && pnpm install && cd ..
 cd classifier-service && uv sync && cd ..
 cd rca-agent-system && uv sync --extra dev && cd ..
+cd frontend && pnpm install && cd ..
 ```
+
+To run anything inside a sub-project later, `cd` into it and use
+`uv run`:
+
+```powershell
+cd rca-agent-system
+uv run python scripts/seed_knowledge_base.py
+uv run python server.py
+```
+
+You should never need to manually activate a venv with `uv`.
 
 ## 2.4 — Configure secrets
 
+**Git Bash:**
 ```bash
 cd rca-agent-system
 cp .env.example .env
 ```
 
-Edit `rca-agent-system/.env`:
+**PowerShell:**
+```powershell
+cd rca-agent-system
+Copy-Item .env.example .env
+```
+
+Edit `rca-agent-system/.env` (Notepad, VS Code, anything):
 
 ```env
 GOOGLE_API_KEY=AIza...PASTE-YOUR-KEY-HERE
@@ -157,10 +228,28 @@ If you see fewer than 6, run `scripts/reset_memory.py` and retry.
 
 ## 2.6 — Validate
 
+Run from the **repo root**, one block at a time:
+
+**PowerShell:**
+```powershell
+cd frontend
+pnpm test          # expect: 145 passed
+cd ..
+
+cd classifier-service
+uv run pytest -q   # expect: 9 passed
+cd ..
+
+cd rca-agent-system
+uv run pytest -q   # expect: 85 passed
+cd ..
+```
+
+**Git Bash:**
 ```bash
-cd ../frontend && pnpm test ; cd ..              # 145 passed
-cd classifier-service && uv run pytest -q ; cd ..  # 9 passed
-cd rca-agent-system && uv run pytest -q ; cd ..    # 85 passed
+cd frontend && pnpm test && cd ..
+cd classifier-service && uv run pytest -q && cd ..
+cd rca-agent-system && uv run pytest -q && cd ..
 ```
 
 **Total: 239 tests should pass.** If any fail, fix it now — not on
@@ -745,6 +834,58 @@ core sentence; expand if pressed.
 
 Things that can go wrong on the day, and recovery without disrupting
 demo flow.
+
+## Setup-time errors (Part 2 install)
+
+### `error: No pyproject.toml found in current directory or any parent directory`
+
+**Cause:** you ran `uv sync` (or `pip install -e .`) from the **repo
+root**. This is a monorepo — there's no top-level `pyproject.toml`
+by design. Each sub-project has its own.
+
+**Fix:**
+```powershell
+# If you accidentally created a venv at the root, remove it:
+deactivate                              # only if a venv is active
+Remove-Item -Recurse -Force .venv       # PowerShell
+# (Git Bash: rm -rf .venv)
+
+# Then install per sub-project:
+cd classifier-service ; uv sync ; cd ..
+cd rca-agent-system ; uv sync --extra dev ; cd ..
+cd frontend ; pnpm install ; cd ..
+```
+
+`uv` creates a `.venv` *inside* each sub-project. You don't run
+`python -m venv` or `Activate.ps1` yourself.
+
+### `cp : The term 'cp' is not recognized` (PowerShell)
+
+**Cause:** `cp` is a Unix command. PowerShell aliases it on most
+modern setups, but not always.
+
+**Fix:** Use `Copy-Item` instead, or just create the `.env` in any
+text editor by saving a copy of `.env.example` as `.env`.
+
+### `pnpm : The term 'pnpm' is not recognized`
+
+**Cause:** pnpm not on PATH yet — `npm install -g pnpm` needs a new
+shell to register the global binary.
+
+**Fix:** Close the PowerShell window and open a new one. Re-run
+`pnpm --version` to confirm.
+
+### `uv : The term 'uv' is not recognized`
+
+**Cause:** uv installer ran but PATH wasn't refreshed.
+
+**Fix:** Close and reopen the terminal. If still missing, the
+PowerShell installer added uv to `$env:USERPROFILE\.local\bin` —
+verify it exists and add it to PATH manually if needed.
+
+---
+
+## Demo-time errors
 
 ## "Both health pills are red"
 
