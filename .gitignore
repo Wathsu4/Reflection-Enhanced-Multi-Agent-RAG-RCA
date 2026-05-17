@@ -19,6 +19,9 @@ classifier-service/models/
 rca-agent-system/data/
 rca-agent-system/**/sessions.db
 
+# Regenerated output of helpful_scripts/visualize_data_and_labels.py
+helpful_scripts/samples/
+
 # IDE / OS
 .vscode/
 .idea/
