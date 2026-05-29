@@ -666,6 +666,53 @@ def render_markdown_report(
     return "\n".join(lines)
 
 
+# -------------------- transient-error retry --------------------
+
+# Substrings that mark a *transient* Gemini failure worth retrying (server
+# overload / rate limit), as opposed to a real bug. Matched against the
+# captured error string case-insensitively.
+_TRANSIENT_MARKERS = (
+    "503",
+    "unavailable",
+    "high demand",
+    "429",
+    "resource_exhausted",
+    "rate limit",
+    "deadline",
+    "timeout",
+)
+
+
+def _is_transient_error(err: str | None) -> bool:
+    if not err:
+        return False
+    low = err.lower()
+    return any(m in low for m in _TRANSIENT_MARKERS)
+
+
+async def _run_with_retry(
+    scenario: Scenario, ablation: str, retries: int, base_delay: float
+) -> ScenarioResult:
+    """Run one scenario, retrying on *transient* Gemini errors with
+    exponential backoff. Non-transient errors (and success) return on the
+    first attempt. This keeps a 503 spike from corrupting the comparison
+    across ablation variants."""
+    r = await _run_pipeline_for_scenario(scenario, ablation=ablation)
+    attempt = 0
+    while _is_transient_error(r.error) and attempt < retries:
+        delay = base_delay * (2**attempt)
+        print(
+            f"      transient error on {scenario.id}; retry "
+            f"{attempt + 1}/{retries} in {delay:.0f}s",
+            file=sys.stderr,
+            flush=True,
+        )
+        await asyncio.sleep(delay)
+        attempt += 1
+        r = await _run_pipeline_for_scenario(scenario, ablation=ablation)
+    return r
+
+
 # -------------------- entry point --------------------
 
 
@@ -692,7 +739,7 @@ async def amain(args: argparse.Namespace) -> int:
     for i, sc in enumerate(scenarios, 1):
         print(f"  [{i}/{n}] {sc.id} …", file=sys.stderr, flush=True)
         _emit_progress(progress, event="scenario_start", i=i, n=n, id=sc.id)
-        r = await _run_pipeline_for_scenario(sc, ablation=ablation)
+        r = await _run_with_retry(sc, ablation, args.retries, args.retry_delay)
         if args.llm_judge and r.extracted_root_cause and r.error is None:
             try:
                 r.llm_judge_verdict = await _llm_judge(sc, r.extracted_root_cause)
@@ -793,6 +840,22 @@ def main(argv: list[str] | None = None) -> int:
             "evaluation console to render live progress. Suppresses the "
             "trailing pretty summary dump."
         ),
+    )
+    parser.add_argument(
+        "--retries",
+        type=int,
+        default=3,
+        help=(
+            "Retry a scenario up to N times on transient Gemini errors "
+            "(503/429/timeouts) with exponential backoff. Keeps a demand "
+            "spike from corrupting cross-variant comparisons. Default 3."
+        ),
+    )
+    parser.add_argument(
+        "--retry-delay",
+        type=float,
+        default=5.0,
+        help="Base backoff seconds for --retries (doubles each attempt).",
     )
     args = parser.parse_args(argv)
     return asyncio.run(amain(args))
