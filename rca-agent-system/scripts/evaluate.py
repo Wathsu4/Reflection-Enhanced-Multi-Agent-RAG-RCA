@@ -47,6 +47,18 @@ if str(PROJECT_ROOT) not in sys.path:
 from rca_system.ablations import ABLATIONS, DETERMINISTIC_ABLATIONS, build_root_agent  # noqa: E402
 from rca_system.settings import settings  # noqa: E402
 
+# ADK's google-genai auth reads GOOGLE_API_KEY from the process environment,
+# but pydantic-settings only loads it into `settings` (it never exports it).
+# When this script runs the in-process ADK Runner -- via CLI or the eval
+# console subprocess -- bridge the key into os.environ so the pipeline can
+# authenticate. (The HTTP server gets this for free from ADK's own .env load.)
+import os  # noqa: E402
+
+if settings.google_api_key and not os.environ.get("GOOGLE_API_KEY"):
+    os.environ["GOOGLE_API_KEY"] = settings.google_api_key
+if not os.environ.get("GOOGLE_GENAI_USE_VERTEXAI"):
+    os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = settings.google_genai_use_vertexai
+
 EVAL_DIR = PROJECT_ROOT / "eval"
 # Ablation / baseline runs land here so they never clobber the demo-ready
 # `eval/results-*.md` reports (see How-To-Evaluate/PLAN.md decision log).
