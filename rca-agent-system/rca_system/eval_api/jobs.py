@@ -46,6 +46,7 @@ _SCRIPT_PATHS: dict[str, Path] = {
     "classifier_metrics": PROJECT_ROOT / "scripts" / "classifier_metrics.py",
     "ragas": PROJECT_ROOT / "scripts" / "evaluate_ragas.py",
     "pairwise": PROJECT_ROOT / "scripts" / "evaluate_pairwise.py",
+    "cost_vs_volume": PROJECT_ROOT / "scripts" / "cost_vs_volume.py",
 }
 
 # Scripts that read an existing KB and therefore need the sandbox seeded

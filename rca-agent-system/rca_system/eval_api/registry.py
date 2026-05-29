@@ -25,7 +25,12 @@ from pydantic import BaseModel, Field
 # Which underlying script a runnable experiment drives. `None` => not
 # runnable (a planned card).
 ScriptName = Literal[
-    "evaluate", "memory_evolution", "classifier_metrics", "ragas", "pairwise"
+    "evaluate",
+    "memory_evolution",
+    "classifier_metrics",
+    "ragas",
+    "pairwise",
+    "cost_vs_volume",
 ]
 ExperimentStatus = Literal["runnable", "planned"]
 
@@ -518,17 +523,53 @@ EXPERIMENTS: list[Experiment] = [
             "headline number for the efficiency claim. Needs no Gemini calls."
         ),
         description_technical=(
-            "Simulates 1000 chunks at 5% incident rate; counts Gemini "
-            "invocations under gated (classifier-first) vs ungated (RCA on "
-            "every chunk) policies and reports the ratio (RQ4). Pure "
-            "simulation, no Gemini. Not yet implemented (E6.3)."
+            "Simulates `total_chunks` at `incident_pct`% incident rate; counts "
+            "Gemini invocations under gated (classifier-first) vs ungated (RCA "
+            "on every chunk) policies and reports the reduction ratio plus a "
+            "wall-time model (RQ4). Pure deterministic simulation, no Gemini "
+            "(E6.3)."
         ),
         rq_tags=["RQ4"],
         family="E6.3",
-        status="planned",
+        status="runnable",
+        script="cost_vs_volume",
+        base_args=[],
+        params=[
+            ParamSpec(
+                name="total_chunks",
+                label="Total log chunks",
+                kind="int",
+                cli_flag="--total-chunks",
+                default=1000,
+                minimum=1,
+                maximum=1_000_000,
+                help="Size of the simulated log stream.",
+            ),
+            ParamSpec(
+                name="incident_pct",
+                label="Incident rate (%)",
+                kind="int",
+                cli_flag="--incident-pct",
+                default=5,
+                minimum=0,
+                maximum=100,
+                help="Percentage of chunks that are real incidents (ERROR/FATAL).",
+            ),
+            ParamSpec(
+                name="calls_per_rca",
+                label="Gemini calls per RCA",
+                kind="int",
+                cli_flag="--calls-per-rca",
+                default=4,
+                minimum=1,
+                maximum=10,
+                help="LLM calls the multi-agent pipeline makes per investigation.",
+            ),
+        ],
+        outputs_glob="experiments/cost-vs-volume-*.md",
         gemini=False,
-        gemini_cost_note="No Gemini calls.",
-        expected_runtime="TBD (fast).",
+        gemini_cost_note="No Gemini calls — deterministic and instant.",
+        expected_runtime="Instant.",
     ),
     Experiment(
         id="classifier-metrics",
