@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field
 
 # Which underlying script a runnable experiment drives. `None` => not
 # runnable (a planned card).
-ScriptName = Literal["evaluate", "memory_evolution", "classifier_metrics"]
+ScriptName = Literal["evaluate", "memory_evolution", "classifier_metrics", "ragas"]
 ExperimentStatus = Literal["runnable", "planned"]
 
 
@@ -394,17 +394,22 @@ EXPERIMENTS: list[Experiment] = [
             "were the relevant ones (context precision)."
         ),
         description_technical=(
-            "RAGAS-style triad re-implemented with Gemini-as-judge: "
+            "RAGAS-style triad re-implemented locally with Gemini-as-judge: "
             "faithfulness (claims grounded in retrieved context), answer "
-            "relevancy (back-translation cosine similarity), context "
-            "precision (fraction of retrieved incidents actually cited). "
-            "Not yet implemented (E4.1)."
+            "relevancy (cosine between the log chunk and questions "
+            "back-generated from the report), context precision (rank-aware "
+            "average precision of retrieved vs cited incidents -- "
+            "deterministic). Runs the full pipeline then scores it (E4.1)."
         ),
         rq_tags=["RQ1", "RQ2"],
         family="E4.1",
-        status="planned",
-        gemini_cost_note="Several Gemini calls per scenario.",
-        expected_runtime="TBD.",
+        status="runnable",
+        script="ragas",
+        base_args=["--ablation", "none"],
+        params=[_LIMIT_PARAM],
+        outputs_glob="experiments/ragas-*.md",
+        gemini_cost_note="~3 metric Gemini calls/scenario on top of the pipeline run.",
+        expected_runtime="~12–18 min for all 15.",
     ),
     Experiment(
         id="pairwise-judge",

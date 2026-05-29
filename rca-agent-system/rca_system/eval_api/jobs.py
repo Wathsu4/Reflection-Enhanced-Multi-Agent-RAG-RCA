@@ -44,7 +44,12 @@ _SCRIPT_PATHS: dict[str, Path] = {
     "evaluate": PROJECT_ROOT / "scripts" / "evaluate.py",
     "memory_evolution": PROJECT_ROOT / "scripts" / "evaluate_memory_evolution.py",
     "classifier_metrics": PROJECT_ROOT / "scripts" / "classifier_metrics.py",
+    "ragas": PROJECT_ROOT / "scripts" / "evaluate_ragas.py",
 }
+
+# Scripts that read an existing KB and therefore need the sandbox seeded
+# first. (memory_evolution reseeds itself; classifier_metrics needs no KB.)
+_SCRIPTS_NEEDING_SEED: frozenset[str] = frozenset({"evaluate", "ragas"})
 
 # Cap the in-memory log tail so a long run can't grow unbounded.
 _LOG_TAIL_MAX = 300
@@ -167,10 +172,10 @@ class JobManager:
             sandbox.mkdir(parents=True, exist_ok=True)
             env = {**os.environ, "CHROMA_PERSIST_DIR": str(sandbox)}
 
-            # `evaluate.py` reads an existing KB, so seed the sandbox first.
-            # `memory_evolution` reseeds itself (its --reset uses the same
-            # CHROMA_PERSIST_DIR), so we leave it to the script.
-            if experiment.script == "evaluate":
+            # Scripts that read an existing KB (evaluate, ragas) need the
+            # sandbox seeded first. memory_evolution reseeds itself; the
+            # classifier-metrics card needs no KB.
+            if experiment.script in _SCRIPTS_NEEDING_SEED:
                 job.progress.phase = "seeding"
                 await self._seed_sandbox(env)
 
