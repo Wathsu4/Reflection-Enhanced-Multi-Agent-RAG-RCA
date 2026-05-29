@@ -45,10 +45,12 @@ _SCRIPT_PATHS: dict[str, Path] = {
     "memory_evolution": PROJECT_ROOT / "scripts" / "evaluate_memory_evolution.py",
     "classifier_metrics": PROJECT_ROOT / "scripts" / "classifier_metrics.py",
     "ragas": PROJECT_ROOT / "scripts" / "evaluate_ragas.py",
+    "pairwise": PROJECT_ROOT / "scripts" / "evaluate_pairwise.py",
 }
 
 # Scripts that read an existing KB and therefore need the sandbox seeded
-# first. (memory_evolution reseeds itself; classifier_metrics needs no KB.)
+# first. (memory_evolution reseeds itself; classifier_metrics needs no KB;
+# pairwise reads already-produced result files, no pipeline run.)
 _SCRIPTS_NEEDING_SEED: frozenset[str] = frozenset({"evaluate", "ragas"})
 
 # Cap the in-memory log tail so a long run can't grow unbounded.

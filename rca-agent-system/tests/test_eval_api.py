@@ -43,6 +43,8 @@ def test_registry_has_runnable_and_planned() -> None:
             "memory_evolution",
             "classifier_metrics",
             "ragas",
+            "pairwise",
+            "cost_vs_volume",
         }, e.id
         assert e.outputs_glob, e.id
 
@@ -105,7 +107,7 @@ def test_run_unknown_experiment_404() -> None:
 
 def test_run_planned_experiment_400() -> None:
     # A planned experiment is not runnable yet.
-    r = client.post("/eval/experiments/pairwise-judge/run", json={"params": {}})
+    r = client.post("/eval/experiments/bootstrap-cis/run", json={"params": {}})
     assert r.status_code == 400
 
 
@@ -252,7 +254,7 @@ async def test_single_flight_rejects_second_start(hermetic_manager) -> None:
 
 
 async def test_start_rejects_planned_experiment(hermetic_manager) -> None:
-    exp = get_experiment("pairwise-judge")
+    exp = get_experiment("bootstrap-cis")
     assert exp is not None and exp.status == "planned"
     with pytest.raises(RuntimeError):
         await hermetic_manager.start(exp, {})

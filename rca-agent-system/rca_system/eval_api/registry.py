@@ -24,7 +24,9 @@ from pydantic import BaseModel, Field
 
 # Which underlying script a runnable experiment drives. `None` => not
 # runnable (a planned card).
-ScriptName = Literal["evaluate", "memory_evolution", "classifier_metrics", "ragas"]
+ScriptName = Literal[
+    "evaluate", "memory_evolution", "classifier_metrics", "ragas", "pairwise"
+]
 ExperimentStatus = Literal["runnable", "planned"]
 
 
@@ -421,16 +423,23 @@ EXPERIMENTS: list[Experiment] = [
             "models to favour whichever answer is shown first."
         ),
         description_technical=(
-            "Pairwise Gemini judge: 3 calls A/B + 3 calls B/A with an "
-            "explicit 'ignore position and length' instruction, aggregated by "
-            "6-call majority. Mitigates position bias (Zheng et al. 2024). "
-            "Not yet implemented (E4.2)."
+            "Pairwise Gemini judge over already-produced reports (reads the "
+            "Day-2 result files, no pipeline re-run): 3 calls A/B + 3 calls "
+            "B/A with an explicit 'ignore position and length' instruction, "
+            "reference-based, aggregated by 6-vote majority. Reports win-rate "
+            "and an order-inconsistency diagnostic for position bias (Zheng "
+            "et al. 2024). Default pair: full system vs CoT-only baseline "
+            "(E4.2)."
         ),
         rq_tags=["RQ1", "RQ2"],
         family="E4.2",
-        status="planned",
-        gemini_cost_note="6 Gemini calls per variant pair per scenario.",
-        expected_runtime="TBD.",
+        status="runnable",
+        script="pairwise",
+        base_args=["--variant-a", "none", "--variant-b", "cot_only"],
+        params=[_LIMIT_PARAM],
+        outputs_glob="experiments/pairwise-*.md",
+        gemini_cost_note="6 judge Gemini calls/scenario (no pipeline re-run).",
+        expected_runtime="~6–10 min for all 15.",
     ),
     Experiment(
         id="bootstrap-cis",
