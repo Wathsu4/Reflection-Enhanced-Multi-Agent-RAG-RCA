@@ -1,0 +1,436 @@
+{
+  "summary": {
+    "n": 15,
+    "ablation": "no_rag",
+    "n_in_domain": 12,
+    "n_ood": 3,
+    "keyword_verdict_counts": {
+      "exact": 10,
+      "partial": 4,
+      "miss": 1
+    },
+    "keyword_accuracy_exact_or_partial": 0.933,
+    "expected_incident_retrieval_recall": 0.0,
+    "retrieval_ir": {
+      "n_scored": 0,
+      "recall_at_k": null,
+      "mrr": null,
+      "ndcg_at_k": null,
+      "k": 5
+    },
+    "mean_latency_s": 9.858,
+    "p95_latency_s": 14.5,
+    "mean_stage_latency_s": {
+      "reasoning_agent": 5.46,
+      "memory_update_agent": 4.681
+    },
+    "mean_top_retrieval_similarity": null,
+    "mean_total_tokens": 4403.9,
+    "mean_stage_tokens": {
+      "reasoning_agent": 1303.214,
+      "memory_update_agent": 3100.643
+    },
+    "llm_judge_verdict_counts": null
+  },
+  "results": [
+    {
+      "id": "redis-1",
+      "expected_incident_id": "redis-conn-refused-001",
+      "final_markdown": "",
+      "extracted_root_cause": "",
+      "keyword_score": 0.0,
+      "keyword_verdict": "miss",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 5.891,
+      "llm_judge_verdict": null,
+      "error": "ServerError: 503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}",
+      "ablation": "no_rag",
+      "stage_latency_s": {},
+      "stage_tokens": {},
+      "prompt_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "redis-2",
+      "expected_incident_id": "redis-conn-refused-001",
+      "final_markdown": "## Root cause\nThe most likely root cause is an unavailability of the Redis caching server at 10.20.5.12:6379, indicated by an ECONNREFUSED error. This forced the application to fall back to direct database reads, subsequently increasing the load on the database or introducing higher latency for read operations, which resulted in a significant spike in p99 read latency. No retrieved incidents were used.\n\n## Suggested actions\n* Check the status of the Redis server process and network connectivity on 10.20.5.12.\n* Investigate the specific reason for the ECONNREFUSED error on the Redis server.\n* Monitor database load and query performance metrics following the Redis fallback.\n* Review application logs for increased database query volume or errors around the incident time.\n\n## Confidence & caveats\nConfidence: 0.95. The overall quality of the hypothesis is not available as the reflection agent's verdict was not provided.\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The most likely root cause is an unavailability of the Redis caching server at 10.20.5.12:6379, indicated by an ECONNREFUSED error. This forced the application to fall back to direct database reads, subsequently increasing the load on the database or introducing higher latency for read operations, which resulted in a significant spike in p99 read latency. No retrieved incidents were used.",
+      "keyword_score": 0.5,
+      "keyword_verdict": "partial",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 10.28,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "no_rag",
+      "stage_latency_s": {
+        "reasoning_agent": 5.543,
+        "memory_update_agent": 4.736
+      },
+      "stage_tokens": {
+        "reasoning_agent": 1348,
+        "memory_update_agent": 3195
+      },
+      "prompt_tokens": 3183,
+      "output_tokens": 512,
+      "total_tokens": 4543,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "jvm-oom-1",
+      "expected_incident_id": "jvm-oom-heap-001",
+      "final_markdown": "## Root cause\nThe 'order-processor' service crashed due to an OutOfMemoryError (OOM) caused by Java heap space exhaustion, specifically failing to allocate 512MB. This critical failure led to the JVM terminating and the service exiting, subsequently causing a cascading failure where three dependent services became unreachable.\n\n## Suggested actions\n* Analyze the JVM heap dump from the 'order-processor' service to identify memory leaks or excessive object retention.\n* Review recent code changes or increased load on 'order-processor' that might have increased its memory footprint.\n* Consider increasing the maximum JVM heap size (-Xmx) for the 'order-processor' service as a potential short-term mitigation.\n* Investigate the specific operations 'order-processor' was performing at the time of the OOM to understand memory allocation patterns.\n\n## Confidence & caveats\nConfidence: 0.4. The reflection agent did not provide an overall_quality verdict for this incident.\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The 'order-processor' service crashed due to an OutOfMemoryError (OOM) caused by Java heap space exhaustion, specifically failing to allocate 512MB. This critical failure led to the JVM terminating and the service exiting, subsequently causing a cascading failure where three dependent services became unreachable.",
+      "keyword_score": 0.8,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 14.5,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "no_rag",
+      "stage_latency_s": {
+        "reasoning_agent": 9.672,
+        "memory_update_agent": 4.828
+      },
+      "stage_tokens": {
+        "reasoning_agent": 1517,
+        "memory_update_agent": 3226
+      },
+      "prompt_tokens": 3335,
+      "output_tokens": 519,
+      "total_tokens": 4743,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "jvm-oom-2",
+      "expected_incident_id": "jvm-oom-heap-001",
+      "final_markdown": "## Root cause\nThe application experienced a Java OutOfMemoryError because the Java heap space was exhausted. This appears to have happened in the `OrderHistoryCache.put` method, which consumed more memory than was available. As a result, the operating system terminated the process with exit code 137, indicating an OOM-kill.\n\n## Suggested actions\n* Analyze a heap dump taken at the time of the OOM to identify the objects consuming the most memory.\n* Review the `OrderHistoryCache` implementation for potential memory leaks, unbounded growth, or inefficiencies in storing objects.\n* Verify the cache configuration, including maximum size, eviction policies, and object size limits.\n* Implement or enhance monitoring for Java heap usage to detect high memory consumption before an OOM occurs.\n\n## Confidence & caveats\nConfidence: 0.95. The overall quality of the reflection was not provided.\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The application experienced a Java OutOfMemoryError because the Java heap space was exhausted. This appears to have happened in the `OrderHistoryCache.put` method, which consumed more memory than was available. As a result, the operating system terminated the process with exit code 137, indicating an OOM-kill.",
+      "keyword_score": 1.0,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 9.249,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "no_rag",
+      "stage_latency_s": {
+        "reasoning_agent": 5.495,
+        "memory_update_agent": 3.754
+      },
+      "stage_tokens": {
+        "reasoning_agent": 1196,
+        "memory_update_agent": 2997
+      },
+      "prompt_tokens": 3172,
+      "output_tokens": 494,
+      "total_tokens": 4193,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "deadlock-1",
+      "expected_incident_id": "db-deadlock-001",
+      "final_markdown": "## Root cause\nThe most likely root cause is a database deadlock occurring during a transaction on the 'order update path'. The application attempted to retry the transaction multiple times, but all retries failed, indicating a persistent contention issue or a deadlock that couldn't be resolved within the retry mechanism.\n\n## Suggested actions\n* Investigate the database logs for the specific deadlock details, including the queries and locks involved.\n* Analyze the application code handling 'order update path' to understand transaction boundaries and concurrency patterns.\n* Review the indexing strategy and query plans for tables involved in order updates to identify potential contention points.\n* Consider implementing a circuit breaker or alert on sustained deadlock failures if this is a recurring issue.\n\n## Confidence & caveats\nConfidence: 0.4. The overall quality of the hypothesis is not available as no reflection agent's verdict was provided.\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The most likely root cause is a database deadlock occurring during a transaction on the 'order update path'. The application attempted to retry the transaction multiple times, but all retries failed, indicating a persistent contention issue or a deadlock that couldn't be resolved within the retry mechanism.",
+      "keyword_score": 0.6,
+      "keyword_verdict": "partial",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 7.764,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "no_rag",
+      "stage_latency_s": {
+        "reasoning_agent": 4.142,
+        "memory_update_agent": 3.621
+      },
+      "stage_tokens": {
+        "reasoning_agent": 1060,
+        "memory_update_agent": 2861
+      },
+      "prompt_tokens": 3044,
+      "output_tokens": 456,
+      "total_tokens": 3921,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "deadlock-2",
+      "expected_incident_id": "db-deadlock-001",
+      "final_markdown": "## Root cause\nThe most likely root cause is a PostgreSQL database deadlock. The logs explicitly state 'deadlock detected' and detail that Process 1842 is waiting for a ShareLock on transaction 998877, indicating a classic deadlock scenario where two or more transactions are mutually blocked, each waiting for a resource held by another.\n\n## Suggested actions\n* Examine the PostgreSQL server logs for details on the queries involved in transaction 998877 and process 1842, as suggested by the HINT.\n* Identify the application code paths that initiate the transactions leading to this deadlock.\n* Analyze the transaction logic for potential race conditions or sub-optimal lock acquisition order.\n* Implement retry logic in the application code specifically for 'DeadlockDetected' errors.\n\n## Confidence & caveats\nConfidence: 0.8. The overall quality of the reflection was not provided.\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The most likely root cause is a PostgreSQL database deadlock. The logs explicitly state 'deadlock detected' and detail that Process 1842 is waiting for a ShareLock on transaction 998877, indicating a classic deadlock scenario where two or more transactions are mutually blocked, each waiting for a resource held by another.",
+      "keyword_score": 1.0,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 8.071,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "no_rag",
+      "stage_latency_s": {
+        "reasoning_agent": 4.887,
+        "memory_update_agent": 3.183
+      },
+      "stage_tokens": {
+        "reasoning_agent": 1175,
+        "memory_update_agent": 3051
+      },
+      "prompt_tokens": 3150,
+      "output_tokens": 493,
+      "total_tokens": 4226,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "upstream-1",
+      "expected_incident_id": "upstream-timeout-payments-001",
+      "final_markdown": "## Root cause\nThe most likely root cause is an unresponsiveness or outage of the 'payments' upstream service. The system is experiencing timeouts when attempting to communicate with 'payments', leading to order failures and, due to repeated failures, has triggered a circuit breaker to protect itself. No retrieved incidents were used.\n\n## Suggested actions\n* Immediately check the health, logs, and metrics of the 'payments' service.\n* Investigate network connectivity and latency between this service and the 'payments' service.\n* Review recent deployments or configuration changes for the 'payments' service.\n* Examine resource utilization (CPU, memory, I/O) on the 'payments' service hosts.\n\n## Confidence & caveats\nConfidence: 0.4\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The most likely root cause is an unresponsiveness or outage of the 'payments' upstream service. The system is experiencing timeouts when attempting to communicate with 'payments', leading to order failures and, due to repeated failures, has triggered a circuit breaker to protect itself. No retrieved incidents were used.",
+      "keyword_score": 1.0,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 8.732,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "no_rag",
+      "stage_latency_s": {
+        "reasoning_agent": 4.142,
+        "memory_update_agent": 4.59
+      },
+      "stage_tokens": {
+        "reasoning_agent": 1182,
+        "memory_update_agent": 2977
+      },
+      "prompt_tokens": 3003,
+      "output_tokens": 424,
+      "total_tokens": 4159,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "upstream-2",
+      "expected_incident_id": "upstream-timeout-payments-001",
+      "final_markdown": "## Root cause\nThe most likely root cause is a service degradation or unresponsiveness in the `payments-api` service. The initial request timed out after 30 seconds, resulting in an HTTP 504 error. Subsequent retry attempts also failed, indicating a sustained issue with the `payments-api`, ultimately leading the calling service to exhaust its retries and return an HTTP 502 to its client.\n\n## Suggested actions\n* Immediately check the health, logs, and metrics of the `payments-api` service around 2024-05-01 20:01 UTC.\n* Investigate network latency or connectivity issues between the service making the request and `payments-api`.\n* Examine `payments-api`'s resource utilization (CPU, memory, disk I/O, network) for anomalies during the incident window.\n* Review `payments-api`'s own dependencies for any upstream failures or slowness.\n\n## Confidence & caveats\nConfidence: 0.4.\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The most likely root cause is a service degradation or unresponsiveness in the `payments-api` service. The initial request timed out after 30 seconds, resulting in an HTTP 504 error. Subsequent retry attempts also failed, indicating a sustained issue with the `payments-api`, ultimately leading the calling service to exhaust its retries and return an HTTP 502 to its client.",
+      "keyword_score": 0.6,
+      "keyword_verdict": "partial",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 10.268,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "no_rag",
+      "stage_latency_s": {
+        "reasoning_agent": 5.728,
+        "memory_update_agent": 4.539
+      },
+      "stage_tokens": {
+        "reasoning_agent": 1415,
+        "memory_update_agent": 3258
+      },
+      "prompt_tokens": 3236,
+      "output_tokens": 539,
+      "total_tokens": 4673,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "tls-1",
+      "expected_incident_id": "tls-cert-expired-001",
+      "final_markdown": "## Root cause\nThe most likely root cause is an expired SSL/TLS certificate on the `admin-api` service. The log entries show an initial \"HTTPS handshake failed: certificate verify failed (expired)\" error, which directly explains the subsequent \"admin-api health-check failed (connect: error)\" and the ultimate \"Maintenance dashboard unreachable -- deploy blocked\" fatal error. All these issues appear to cascade from the inability to establish a secure connection due to the expired certificate.\n\n## Suggested actions\n* Verify the SSL/TLS certificate currently in use by the `admin-api` service.\n* Renew or replace the expired certificate with a valid one.\n* Ensure the new certificate is correctly deployed and the `admin-api` service reloaded or restarted.\n* Re-attempt the deployment after certificate resolution.\n\n## Confidence & caveats\nConfidence: 0.9\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The most likely root cause is an expired SSL/TLS certificate on the `admin-api` service. The log entries show an initial \"HTTPS handshake failed: certificate verify failed (expired)\" error, which directly explains the subsequent \"admin-api health-check failed (connect: error)\" and the ultimate \"Maintenance dashboard unreachable -- deploy blocked\" fatal error. All these issues appear to cascade from the inability to establish a secure connection due to the expired certificate.",
+      "keyword_score": 1.0,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 8.926,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "no_rag",
+      "stage_latency_s": {
+        "reasoning_agent": 4.709,
+        "memory_update_agent": 4.216
+      },
+      "stage_tokens": {
+        "reasoning_agent": 1087,
+        "memory_update_agent": 2799
+      },
+      "prompt_tokens": 2895,
+      "output_tokens": 429,
+      "total_tokens": 3886,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "tls-2",
+      "expected_incident_id": "tls-cert-expired-001",
+      "final_markdown": "## Root cause\nThe most likely root cause is an expired x509 certificate. The log clearly indicates that the certificate's `notAfter` date (2024-06-11T23:59:59) is prior to the current system time (2024-06-12T12:00:02), causing it to be invalid. This certificate expiration directly led to the subsequent failure of 'Synchronization to internal-api aborted'. No retrieved incidents were used.\n\n## Suggested actions\n* Identify the specific certificate causing the 'x509: certificate has expired' error.\n* Renew or replace the expired certificate with a valid one.\n* Restart the affected service to ensure it picks up the new certificate.\n* Verify the successful synchronization to the internal-api after the certificate update.\n\n## Confidence & caveats\nConfidence: 0.4. The reflection agent's verdict was not provided, so an overall quality assessment is unavailable.\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The most likely root cause is an expired x509 certificate. The log clearly indicates that the certificate's `notAfter` date (2024-06-11T23:59:59) is prior to the current system time (2024-06-12T12:00:02), causing it to be invalid. This certificate expiration directly led to the subsequent failure of 'Synchronization to internal-api aborted'. No retrieved incidents were used.",
+      "keyword_score": 0.75,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 10.502,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "no_rag",
+      "stage_latency_s": {
+        "reasoning_agent": 4.979,
+        "memory_update_agent": 5.523
+      },
+      "stage_tokens": {
+        "reasoning_agent": 1403,
+        "memory_update_agent": 3540
+      },
+      "prompt_tokens": 3275,
+      "output_tokens": 544,
+      "total_tokens": 4943,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "disk-1",
+      "expected_incident_id": "disk-full-log-001",
+      "final_markdown": "## Root cause\nThe most likely root cause is a 'no space left on device' error on the `/var/log` filesystem, which reached 100% usage. This prevented the service from writing to its log files and subsequently caused it to become stuck due to an inability to flush buffers, as it couldn't perform necessary disk I/O operations. No retrieved incidents were used.\n\n## Suggested actions\n* Verify disk usage on the affected host, specifically the `/var/log` partition.\n* Identify and remove large or runaway log files to free up space.\n* Restart the affected service after clearing disk space.\n* Investigate the cause of excessive log generation to prevent recurrence.\n\n## Confidence & caveats\nConfidence: 0.98. No reflection agent verdict was available for this incident.\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The most likely root cause is a 'no space left on device' error on the `/var/log` filesystem, which reached 100% usage. This prevented the service from writing to its log files and subsequently caused it to become stuck due to an inability to flush buffers, as it couldn't perform necessary disk I/O operations. No retrieved incidents were used.",
+      "keyword_score": 0.75,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 12.237,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "no_rag",
+      "stage_latency_s": {
+        "reasoning_agent": 4.863,
+        "memory_update_agent": 7.373
+      },
+      "stage_tokens": {
+        "reasoning_agent": 1238,
+        "memory_update_agent": 3635
+      },
+      "prompt_tokens": 3021,
+      "output_tokens": 440,
+      "total_tokens": 4873,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "disk-2",
+      "expected_incident_id": "disk-full-log-001",
+      "final_markdown": "## Root cause\nThe most likely root cause is that the service became unresponsive due to a disk-fill event. Specifically, the system ran out of space on the device, which prevented further write operations, leading to service disruption.\n\n## Suggested actions\n* Check the disk utilization of the affected host immediately.\n* Identify which files or processes are consuming the most disk space.\n* Clear unnecessary files or allocate additional disk capacity.\n* Review and enhance disk space monitoring and alerting for this service.\n\n## Confidence & caveats\nConfidence: 0.8. The hypothesis is well-supported by the provided evidence.\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The most likely root cause is that the service became unresponsive due to a disk-fill event. Specifically, the system ran out of space on the device, which prevented further write operations, leading to service disruption.",
+      "keyword_score": 0.333,
+      "keyword_verdict": "partial",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 8.017,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "no_rag",
+      "stage_latency_s": {
+        "reasoning_agent": 3.083,
+        "memory_update_agent": 4.935
+      },
+      "stage_tokens": {
+        "reasoning_agent": 786,
+        "memory_update_agent": 2485
+      },
+      "prompt_tokens": 2452,
+      "output_tokens": 290,
+      "total_tokens": 3271,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "ood-dns",
+      "expected_incident_id": null,
+      "final_markdown": "## Root cause\nThe most likely root cause is a DNS resolution failure for the third-party endpoint `api.partner.example.com`. The `NXDOMAIN` error indicates that the DNS server responded, but reported that the domain name does not exist. This led to the outbound webhook delivery being aborted because the endpoint was unresolvable.\n\n## Suggested actions\n* Verify the spelling of `api.partner.example.com` in the webhook configuration.\n* Check the DNS records for `partner.example.com` to ensure the `api` subdomain exists and is correctly configured.\n* Attempt to resolve `api.partner.example.com` manually from the affected host using `dig` or `nslookup`.\n* Confirm that the DNS servers used by the service are correctly configured and can resolve public domains.\n\n## Confidence & caveats\nConfidence: 0.95. The overall quality of the hypothesis was not assessed by the reflection agent.\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The most likely root cause is a DNS resolution failure for the third-party endpoint `api.partner.example.com`. The `NXDOMAIN` error indicates that the DNS server responded, but reported that the domain name does not exist. This led to the outbound webhook delivery being aborted because the endpoint was unresolvable.",
+      "keyword_score": 0.667,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 8.461,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "no_rag",
+      "stage_latency_s": {
+        "reasoning_agent": 3.792,
+        "memory_update_agent": 4.668
+      },
+      "stage_tokens": {
+        "reasoning_agent": 1054,
+        "memory_update_agent": 3083
+      },
+      "prompt_tokens": 2988,
+      "output_tokens": 486,
+      "total_tokens": 4137,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "ood-rate-limit",
+      "expected_incident_id": null,
+      "final_markdown": "## Root cause\nThe most likely root cause is an unexpected surge in inbound HTTP traffic, directly correlated with a recent marketing email blast. This surge caused the service to exceed its configured rate limit of 1000 requests per minute, peaking at 1240 requests per minute, which resulted in HTTP 429 (Too Many Requests) responses.\n\n## Suggested actions\n* Review the scope and expected traffic impact of the marketing email blast.\n* Coordinate future marketing campaigns with engineering to proactively adjust rate limits or scale infrastructure.\n* Investigate options for dynamic or adaptive rate limiting policies.\n* Analyze historical traffic patterns during previous marketing events to refine future planning.\n\n## Confidence & caveats\nConfidence: 0.4. The reflection agent's verdict on the overall quality of the hypothesis was not provided.\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The most likely root cause is an unexpected surge in inbound HTTP traffic, directly correlated with a recent marketing email blast. This surge caused the service to exceed its configured rate limit of 1000 requests per minute, peaking at 1240 requests per minute, which resulted in HTTP 429 (Too Many Requests) responses.",
+      "keyword_score": 1.0,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 14.478,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "no_rag",
+      "stage_latency_s": {
+        "reasoning_agent": 8.785,
+        "memory_update_agent": 5.693
+      },
+      "stage_tokens": {
+        "reasoning_agent": 2155,
+        "memory_update_agent": 3235
+      },
+      "prompt_tokens": 2926,
+      "output_tokens": 432,
+      "total_tokens": 5390,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "ood-feature-flag",
+      "expected_incident_id": null,
+      "final_markdown": "## Root cause\nThe most likely root cause is a `NullPointerException` within the `FeatureFlagResolver.resolve` method. This error was triggered by the recent rollout of the 'new-checkout-flow' feature flag, suggesting either a misconfiguration of the flag itself or inadequate handling of null/unexpected values by the code that consumes it, leading to 500 errors on the `/api/v3/checkout` endpoint.\n\n## Suggested actions\n* Immediately rollback the 'new-checkout-flow' feature flag to mitigate the ongoing 500 errors.\n* Review the configuration and definition of the 'new-checkout-flow' feature flag for any missing or invalid values.\n* Examine the application code that consumes the 'new-checkout-flow' feature flag to ensure it is robust against null or unexpected values.\n\n## Confidence & caveats\nConfidence: 0.95\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The most likely root cause is a `NullPointerException` within the `FeatureFlagResolver.resolve` method. This error was triggered by the recent rollout of the 'new-checkout-flow' feature flag, suggesting either a misconfiguration of the flag itself or inadequate handling of null/unexpected values by the code that consumes it, leading to 500 errors on the `/api/v3/checkout` endpoint.",
+      "keyword_score": 1.0,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 10.491,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "no_rag",
+      "stage_latency_s": {
+        "reasoning_agent": 6.616,
+        "memory_update_agent": 3.875
+      },
+      "stage_tokens": {
+        "reasoning_agent": 1629,
+        "memory_update_agent": 3067
+      },
+      "prompt_tokens": 3223,
+      "output_tokens": 505,
+      "total_tokens": 4696,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    }
+  ]
+}

@@ -1,0 +1,564 @@
+{
+  "summary": {
+    "n": 15,
+    "ablation": "reflection_off",
+    "n_in_domain": 12,
+    "n_ood": 3,
+    "keyword_verdict_counts": {
+      "exact": 8,
+      "partial": 5,
+      "miss": 2
+    },
+    "keyword_accuracy_exact_or_partial": 0.867,
+    "expected_incident_retrieval_recall": 1.0,
+    "retrieval_ir": {
+      "n_scored": 12,
+      "recall_at_k": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_k": 1.0,
+      "k": 5
+    },
+    "mean_latency_s": 22.073,
+    "p95_latency_s": 81.364,
+    "mean_stage_latency_s": {
+      "retrieval_agent": 6.116,
+      "reasoning_agent": 6.462,
+      "memory_update_agent": 9.495
+    },
+    "mean_top_retrieval_similarity": 0.591,
+    "mean_total_tokens": 11311.5,
+    "mean_stage_tokens": {
+      "retrieval_agent": 2613.0,
+      "reasoning_agent": 3225.067,
+      "memory_update_agent": 5473.4
+    },
+    "llm_judge_verdict_counts": null
+  },
+  "results": [
+    {
+      "id": "redis-1",
+      "expected_incident_id": "redis-conn-refused-001",
+      "final_markdown": "## Root cause\nThe most likely root cause is a network connectivity issue preventing the application from reaching the Redis server, specifically a firewall rule change blocking port 6379. This is strongly consistent with `redis-conn-refused-001`, where a similar 'Connection refused' error was traced back to a firewall change blocking Redis communication.\n\n## Suggested actions\n* Verify network connectivity from the application host to Redis host 10.0.1.100 on port 6379 using tools like `telnet` or `nc`.\n* Review recent firewall rule changes in the application's subnet or Redis's subnet that might affect port 6379.\n* Confirm the Redis server at 10.0.1.100 is running and listening on port 6379.\n* Check for any network ACLs or Security Groups that may have been recently modified.\n\n## Confidence & caveats\nConfidence: 0.9. The overall quality of the hypothesis is not available as no reflection agent's verdict was provided.\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The most likely root cause is a network connectivity issue preventing the application from reaching the Redis server, specifically a firewall rule change blocking port 6379. This is strongly consistent with `redis-conn-refused-001`, where a similar 'Connection refused' error was traced back to a firewall change blocking Redis communication.",
+      "keyword_score": 1.0,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": true,
+      "top_retrieval_similarity": 0.7356,
+      "latency_s": 16.223,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "reflection_off",
+      "stage_latency_s": {
+        "retrieval_agent": 5.879,
+        "reasoning_agent": 5.413,
+        "memory_update_agent": 4.931
+      },
+      "stage_tokens": {
+        "retrieval_agent": 2677,
+        "reasoning_agent": 3150,
+        "memory_update_agent": 6101
+      },
+      "prompt_tokens": 9619,
+      "output_tokens": 1231,
+      "total_tokens": 11928,
+      "retrieved_ids": [
+        "redis-conn-refused-001",
+        "tls-cert-expired-001",
+        "upstream-timeout-payments-001",
+        "disk-full-log-001",
+        "db-deadlock-001"
+      ],
+      "expected_incident_rank": 1
+    },
+    {
+      "id": "redis-2",
+      "expected_incident_id": "redis-conn-refused-001",
+      "final_markdown": "## Root cause\nThe most likely root cause is a network configuration change, specifically a firewall rule, that is blocking the application from reaching the Redis server on port 6379. This directly leads to the `ECONNREFUSED` error, forcing the application to fall back to slower direct DB reads and causing the observed spike in read latency. This is highly consistent with the `redis-conn-refused-001` incident where a firewall change blocked Redis access.\n\n## Suggested actions\n*   Verify the Redis server at 10.20.5.12:6379 is running and healthy.\n*   Check recent network configuration changes and firewall rules between the application host and 10.20.5.12 to ensure port 6379 is open.\n*   Attempt to connect to Redis from the application's host using `telnet 10.20.5.12 6379` or similar tools.\n*   Implement a dedicated monitoring probe for Redis connectivity to detect such issues proactively.\n\n## Confidence & caveats\nConfidence: 0.9.\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The most likely root cause is a network configuration change, specifically a firewall rule, that is blocking the application from reaching the Redis server on port 6379. This directly leads to the `ECONNREFUSED` error, forcing the application to fall back to slower direct DB reads and causing the observed spike in read latency. This is highly consistent with the `redis-conn-refused-001` incident where a firewall change blocked Redis access.",
+      "keyword_score": 0.75,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": true,
+      "top_retrieval_similarity": 0.6126,
+      "latency_s": 18.052,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "reflection_off",
+      "stage_latency_s": {
+        "retrieval_agent": 5.362,
+        "reasoning_agent": 7.77,
+        "memory_update_agent": 4.92
+      },
+      "stage_tokens": {
+        "retrieval_agent": 2752,
+        "reasoning_agent": 3578,
+        "memory_update_agent": 6061
+      },
+      "prompt_tokens": 9351,
+      "output_tokens": 1207,
+      "total_tokens": 12391,
+      "retrieved_ids": [
+        "redis-conn-refused-001",
+        "upstream-timeout-payments-001",
+        "tls-cert-expired-001",
+        "db-deadlock-001",
+        "disk-full-log-001"
+      ],
+      "expected_incident_rank": 1
+    },
+    {
+      "id": "jvm-oom-1",
+      "expected_incident_id": "jvm-oom-heap-001",
+      "final_markdown": "",
+      "extracted_root_cause": "",
+      "keyword_score": 0.0,
+      "keyword_verdict": "miss",
+      "expected_incident_retrieved": true,
+      "top_retrieval_similarity": 0.8034,
+      "latency_s": 18.135,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "reflection_off",
+      "stage_latency_s": {
+        "retrieval_agent": 7.13,
+        "reasoning_agent": 7.77,
+        "memory_update_agent": 3.235
+      },
+      "stage_tokens": {
+        "retrieval_agent": 2768,
+        "reasoning_agent": 3529,
+        "memory_update_agent": 3117
+      },
+      "prompt_tokens": 6966,
+      "output_tokens": 985,
+      "total_tokens": 9414,
+      "retrieved_ids": [
+        "jvm-oom-heap-001",
+        "disk-full-log-001",
+        "upstream-timeout-payments-001",
+        "db-deadlock-001",
+        "tls-cert-expired-001"
+      ],
+      "expected_incident_rank": 1
+    },
+    {
+      "id": "jvm-oom-2",
+      "expected_incident_id": "jvm-oom-heap-001",
+      "final_markdown": "## Root cause\nThe application experienced a Java OutOfMemoryError: Java heap space, leading to the process being OOM-killed by the operating system. This is most likely caused by the `OrderHistoryCache` growing in an unbounded fashion, consuming all available heap memory. This explanation is highly consistent with `jvm-oom-heap-001`, which identified 'unbounded LRU cache growth' in an 'order-history cache' as a root cause for a similar OOM.\n\n## Suggested actions\n* Inspect the `OrderHistoryCache` implementation for missing size limits or improper eviction policies.\n* Review current JVM heap usage metrics and consider increasing the `-Xmx` setting if overall memory requirements have grown.\n* Implement a maximum size cap for the `OrderHistoryCache` to prevent unbounded growth.\n* Configure JVM to capture a heap dump on OutOfMemoryError for detailed post-mortem analysis.\n\n## Confidence & caveats\nConfidence: 0.95. The hypothesis is of good overall quality.\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The application experienced a Java OutOfMemoryError: Java heap space, leading to the process being OOM-killed by the operating system. This is most likely caused by the `OrderHistoryCache` growing in an unbounded fashion, consuming all available heap memory. This explanation is highly consistent with `jvm-oom-heap-001`, which identified 'unbounded LRU cache growth' in an 'order-history cache' as a root cause for a similar OOM.",
+      "keyword_score": 1.0,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": true,
+      "top_retrieval_similarity": 0.6886,
+      "latency_s": 17.27,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "reflection_off",
+      "stage_latency_s": {
+        "retrieval_agent": 5.52,
+        "reasoning_agent": 6.672,
+        "memory_update_agent": 5.077
+      },
+      "stage_tokens": {
+        "retrieval_agent": 2571,
+        "reasoning_agent": 3212,
+        "memory_update_agent": 5839
+      },
+      "prompt_tokens": 9354,
+      "output_tokens": 1171,
+      "total_tokens": 11622,
+      "retrieved_ids": [
+        "jvm-oom-heap-001",
+        "disk-full-log-001",
+        "db-deadlock-001",
+        "upstream-timeout-payments-001",
+        "tls-cert-expired-001"
+      ],
+      "expected_incident_rank": 1
+    },
+    {
+      "id": "deadlock-1",
+      "expected_incident_id": "db-deadlock-001",
+      "final_markdown": "## Root cause\nThe most likely root cause is a database deadlock occurring due to two or more concurrent code paths acquiring row locks in opposite orders during order updates. This aligns perfectly with the root cause identified in `db-deadlock-001`, where similar frequent deadlocks were resolved by establishing a canonical lock acquisition order.\n\n## Suggested actions\n*   Identify the specific code paths involved in updating orders that experienced the deadlock.\n*   Analyze the sequence of database operations and lock acquisition within these concurrent order update paths.\n*   Refactor the code to ensure a consistent, canonical order for acquiring locks across all relevant transactions (e.g., always lock the 'orders' table then 'order_items' table).\n*   Monitor database deadlock metrics closely after deploying changes.\n\n## Confidence & caveats\nConfidence: 0.95. The reflection agent's overall quality verdict is not available, but the high confidence from the reasoning agent suggests a strong likelihood of the identified root cause.\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The most likely root cause is a database deadlock occurring due to two or more concurrent code paths acquiring row locks in opposite orders during order updates. This aligns perfectly with the root cause identified in `db-deadlock-001`, where similar frequent deadlocks were resolved by establishing a canonical lock acquisition order.",
+      "keyword_score": 0.4,
+      "keyword_verdict": "partial",
+      "expected_incident_retrieved": true,
+      "top_retrieval_similarity": 0.6677,
+      "latency_s": 18.282,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "reflection_off",
+      "stage_latency_s": {
+        "retrieval_agent": 7.317,
+        "reasoning_agent": 6.541,
+        "memory_update_agent": 4.425
+      },
+      "stage_tokens": {
+        "retrieval_agent": 2581,
+        "reasoning_agent": 3241,
+        "memory_update_agent": 5655
+      },
+      "prompt_tokens": 9202,
+      "output_tokens": 1131,
+      "total_tokens": 11477,
+      "retrieved_ids": [
+        "db-deadlock-001",
+        "tls-cert-expired-001",
+        "jvm-oom-heap-001",
+        "upstream-timeout-payments-001",
+        "disk-full-log-001"
+      ],
+      "expected_incident_rank": 1
+    },
+    {
+      "id": "deadlock-2",
+      "expected_incident_id": "db-deadlock-001",
+      "final_markdown": "## Root cause\nThe most likely root cause is a database deadlock, occurring when two or more concurrent transactions attempt to acquire locks on resources (such as rows or tables) in an inconsistent or opposite order, leading to a cyclical waiting condition. This is consistent with db-deadlock-001, which describes a similar issue where code paths acquired row locks in opposite order under contention.\n\n## Suggested actions\n*   Analyze PostgreSQL server logs for the detailed queries involved in the deadlock.\n*   Identify application code paths that perform concurrent database operations and acquire multiple locks.\n*   Refactor identified code paths to ensure a canonical and consistent order of lock acquisition.\n*   Implement retry logic with exponential backoff for transactions encountering deadlocks.\n\n## Confidence & caveats\nConfidence: 0.95. The reflection agent's overall quality verdict is not available.\n\n## Memory updates\nNo memory changes applied.\n",
+      "extracted_root_cause": "The most likely root cause is a database deadlock, occurring when two or more concurrent transactions attempt to acquire locks on resources (such as rows or tables) in an inconsistent or opposite order, leading to a cyclical waiting condition. This is consistent with db-deadlock-001, which describes a similar issue where code paths acquired row locks in opposite order under contention.",
+      "keyword_score": 0.5,
+      "keyword_verdict": "partial",
+      "expected_incident_retrieved": true,
+      "top_retrieval_similarity": 0.6133,
+      "latency_s": 16.526,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "reflection_off",
+      "stage_latency_s": {
+        "retrieval_agent": 5.441,
+        "reasoning_agent": 5.941,
+        "memory_update_agent": 5.144
+      },
+      "stage_tokens": {
+        "retrieval_agent": 2574,
+        "reasoning_agent": 3168,
+        "memory_update_agent": 5604
+      },
+      "prompt_tokens": 9076,
+      "output_tokens": 1070,
+      "total_tokens": 11346,
+      "retrieved_ids": [
+        "db-deadlock-001",
+        "tls-cert-expired-001",
+        "disk-full-log-001",
+        "upstream-timeout-payments-001",
+        "jvm-oom-heap-001"
+      ],
+      "expected_incident_rank": 1
+    },
+    {
+      "id": "upstream-1",
+      "expected_incident_id": "upstream-timeout-payments-001",
+      "final_markdown": "",
+      "extracted_root_cause": "",
+      "keyword_score": 0.0,
+      "keyword_verdict": "miss",
+      "expected_incident_retrieved": true,
+      "top_retrieval_similarity": 0.7757,
+      "latency_s": 15.492,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "reflection_off",
+      "stage_latency_s": {
+        "retrieval_agent": 6.192,
+        "reasoning_agent": 6.165,
+        "memory_update_agent": 3.135
+      },
+      "stage_tokens": {
+        "retrieval_agent": 2531,
+        "reasoning_agent": 3192,
+        "memory_update_agent": 2820
+      },
+      "prompt_tokens": 6538,
+      "output_tokens": 897,
+      "total_tokens": 8543,
+      "retrieved_ids": [
+        "upstream-timeout-payments-001",
+        "tls-cert-expired-001",
+        "db-deadlock-001",
+        "redis-conn-refused-001",
+        "disk-full-log-001"
+      ],
+      "expected_incident_rank": 1
+    },
+    {
+      "id": "upstream-2",
+      "expected_incident_id": "upstream-timeout-payments-001",
+      "final_markdown": "## Root cause\nThe most likely root cause is that the `payments-api` service is experiencing performance degradation or is overwhelmed, causing requests to time out. This is strongly consistent with `upstream-timeout-payments-001`, which describes similar payments upstream timeouts attributed to the payments service being under-scaled for traffic.\n\n## Suggested actions\n* Check the current health and performance metrics (CPU, memory, request queue, latency, error rates) of the payments-api service.\n* Investigate recent traffic patterns or deployments that could have impacted the payments-api service capacity.\n* Coordinate with the payments team to review their service's capacity plan and resource utilization.\n* Evaluate implementing or adjusting circuit breakers and client-side timeouts for calls to the payments-api.\n\n## Confidence & caveats\nConfidence: 0.9. The reflection agent did not provide an overall quality verdict for this analysis.\n\n## Memory updates\nNo memory changes applied.\n",
+      "extracted_root_cause": "The most likely root cause is that the `payments-api` service is experiencing performance degradation or is overwhelmed, causing requests to time out. This is strongly consistent with `upstream-timeout-payments-001`, which describes similar payments upstream timeouts attributed to the payments service being under-scaled for traffic.",
+      "keyword_score": 0.6,
+      "keyword_verdict": "partial",
+      "expected_incident_retrieved": true,
+      "top_retrieval_similarity": 0.4135,
+      "latency_s": 16.188,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "reflection_off",
+      "stage_latency_s": {
+        "retrieval_agent": 5.136,
+        "reasoning_agent": 6.677,
+        "memory_update_agent": 4.375
+      },
+      "stage_tokens": {
+        "retrieval_agent": 2613,
+        "reasoning_agent": 3248,
+        "memory_update_agent": 5755
+      },
+      "prompt_tokens": 9134,
+      "output_tokens": 1107,
+      "total_tokens": 11616,
+      "retrieved_ids": [
+        "upstream-timeout-payments-001",
+        "tls-cert-expired-001",
+        "disk-full-log-001",
+        "redis-conn-refused-001",
+        "db-deadlock-001"
+      ],
+      "expected_incident_rank": 1
+    },
+    {
+      "id": "tls-1",
+      "expected_incident_id": "tls-cert-expired-001",
+      "final_markdown": "## Root cause\nThe most likely root cause is an expired TLS certificate affecting the 'admin-api', which in turn makes the Maintenance dashboard unreachable and blocks deployments. This is strongly consistent with `tls-cert-expired-001`, which details a similar issue caused by a failure in an auto-renewal cron job.\n\n## Suggested actions\n* Immediately verify the current TLS certificate status for the admin-api, focusing on its expiry date.\n* Manually renew and deploy a valid TLS certificate for the affected service.\n* Investigate the automated certificate renewal mechanism to determine why it failed (e.g., check cron jobs, logs of certificate management tools).\n* Implement or enhance monitoring and alerting for certificate expiry, ideally with alerts scheduled 30/14/7 days before expiration.\n\n## Confidence & caveats\nConfidence: 0.95. The reflection agent did not provide an overall quality verdict.\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The most likely root cause is an expired TLS certificate affecting the 'admin-api', which in turn makes the Maintenance dashboard unreachable and blocks deployments. This is strongly consistent with `tls-cert-expired-001`, which details a similar issue caused by a failure in an auto-renewal cron job.",
+      "keyword_score": 0.6,
+      "keyword_verdict": "partial",
+      "expected_incident_retrieved": true,
+      "top_retrieval_similarity": 0.7171,
+      "latency_s": 16.434,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "reflection_off",
+      "stage_latency_s": {
+        "retrieval_agent": 5.504,
+        "reasoning_agent": 6.634,
+        "memory_update_agent": 4.295
+      },
+      "stage_tokens": {
+        "retrieval_agent": 2588,
+        "reasoning_agent": 3128,
+        "memory_update_agent": 5518
+      },
+      "prompt_tokens": 9099,
+      "output_tokens": 1120,
+      "total_tokens": 11234,
+      "retrieved_ids": [
+        "tls-cert-expired-001",
+        "redis-conn-refused-001",
+        "disk-full-log-001",
+        "upstream-timeout-payments-001",
+        "db-deadlock-001"
+      ],
+      "expected_incident_rank": 1
+    },
+    {
+      "id": "tls-2",
+      "expected_incident_id": "tls-cert-expired-001",
+      "final_markdown": "## Root cause\nThe synchronization to the internal-api is failing because its TLS certificate has expired. This is indicated by the x509 error showing the certificate's `notAfter` date being in the past relative to the current time. A likely root cause is a failure in the automated certificate renewal mechanism, such as an auto-renewal cron job that has stopped running, consistent with `tls-cert-expired-001`.\n\n## Suggested actions\n* Immediately renew and deploy the TLS certificate for the internal-api.\n* Investigate the automated certificate renewal process for the internal-api to determine why it failed.\n* Implement or verify proactive monitoring and alerting for certificate expiry dates (e.g., 30/14/7 days out).\n* Consider migrating the certificate renewal for this service to a centralized automation platform.\n\n## Confidence & caveats\nConfidence: 1.0. The reflection agent's verdict was not provided, so an overall quality assessment cannot be made.\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The synchronization to the internal-api is failing because its TLS certificate has expired. This is indicated by the x509 error showing the certificate's `notAfter` date being in the past relative to the current time. A likely root cause is a failure in the automated certificate renewal mechanism, such as an auto-renewal cron job that has stopped running, consistent with `tls-cert-expired-001`.",
+      "keyword_score": 1.0,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": true,
+      "top_retrieval_similarity": 0.6621,
+      "latency_s": 81.364,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "reflection_off",
+      "stage_latency_s": {
+        "retrieval_agent": 4.546,
+        "reasoning_agent": 5.752,
+        "memory_update_agent": 71.065
+      },
+      "stage_tokens": {
+        "retrieval_agent": 2572,
+        "reasoning_agent": 3167,
+        "memory_update_agent": 6289
+      },
+      "prompt_tokens": 9351,
+      "output_tokens": 1174,
+      "total_tokens": 12028,
+      "retrieved_ids": [
+        "tls-cert-expired-001",
+        "upstream-timeout-payments-001",
+        "db-deadlock-001",
+        "redis-conn-refused-001",
+        "jvm-oom-heap-001"
+      ],
+      "expected_incident_rank": 1
+    },
+    {
+      "id": "disk-1",
+      "expected_incident_id": "disk-full-log-001",
+      "final_markdown": "## Root cause\nThe most likely root cause is that the `/var/log` partition has reached 100% disk usage due to unmanaged or excessively large application log files, preventing the service from writing to disk and flushing its buffers, causing it to become stuck. This is highly consistent with `disk-full-log-001`, which described a similar situation where application log files filled `/var/log` because they were not rotated.\n\n## Suggested actions\n*   Immediately free up disk space in `/var/log` by identifying and deleting large, old log files.\n*   Implement or verify `logrotate` configurations for all application logs to ensure proper rotation and compression.\n*   Restart the affected service once disk space has been cleared.\n*   Review and adjust disk usage alert thresholds for `/var/log` to proactively detect high usage before it becomes critical.\n\n## Confidence & caveats\nConfidence: 0.98. The reflection agent did not provide an overall quality verdict.\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The most likely root cause is that the `/var/log` partition has reached 100% disk usage due to unmanaged or excessively large application log files, preventing the service from writing to disk and flushing its buffers, causing it to become stuck. This is highly consistent with `disk-full-log-001`, which described a similar situation where application log files filled `/var/log` because they were not rotated.",
+      "keyword_score": 0.5,
+      "keyword_verdict": "partial",
+      "expected_incident_retrieved": true,
+      "top_retrieval_similarity": 0.7445,
+      "latency_s": 24.634,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "reflection_off",
+      "stage_latency_s": {
+        "retrieval_agent": 10.551,
+        "reasoning_agent": 7.259,
+        "memory_update_agent": 6.822
+      },
+      "stage_tokens": {
+        "retrieval_agent": 2622,
+        "reasoning_agent": 3250,
+        "memory_update_agent": 6252
+      },
+      "prompt_tokens": 9414,
+      "output_tokens": 1187,
+      "total_tokens": 12124,
+      "retrieved_ids": [
+        "disk-full-log-001",
+        "jvm-oom-heap-001",
+        "upstream-timeout-payments-001",
+        "db-deadlock-001",
+        "tls-cert-expired-001"
+      ],
+      "expected_incident_rank": 1
+    },
+    {
+      "id": "disk-2",
+      "expected_incident_id": "disk-full-log-001",
+      "final_markdown": "## Root cause\nThe service became unresponsive due to a disk full condition, indicated by the ENOSPC error. This is highly consistent with incident disk-full-log-001, where unrotated application log files filled the /var/log partition, leading to the application host hanging.\n\n## Suggested actions\n*   Check the disk usage on the affected host immediately using `df -h` and `du -sh *`.\n*   Identify which files or directories are consuming the most disk space.\n*   Implement log rotation for application logs if they are found to be filling the disk.\n*   Add a Prometheus alert or similar monitoring for disk usage exceeding 85% on this host.\n\n## Confidence & caveats\nConfidence: 0.95. No specific reflection verdict was provided.\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The service became unresponsive due to a disk full condition, indicated by the ENOSPC error. This is highly consistent with incident disk-full-log-001, where unrotated application log files filled the /var/log partition, leading to the application host hanging.",
+      "keyword_score": 0.667,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": true,
+      "top_retrieval_similarity": 0.5214,
+      "latency_s": 21.554,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "reflection_off",
+      "stage_latency_s": {
+        "retrieval_agent": 6.183,
+        "reasoning_agent": 5.438,
+        "memory_update_agent": 9.934
+      },
+      "stage_tokens": {
+        "retrieval_agent": 2523,
+        "reasoning_agent": 2994,
+        "memory_update_agent": 5591
+      },
+      "prompt_tokens": 8662,
+      "output_tokens": 1014,
+      "total_tokens": 11108,
+      "retrieved_ids": [
+        "disk-full-log-001",
+        "jvm-oom-heap-001",
+        "upstream-timeout-payments-001",
+        "tls-cert-expired-001",
+        "db-deadlock-001"
+      ],
+      "expected_incident_rank": 1
+    },
+    {
+      "id": "ood-dns",
+      "expected_incident_id": null,
+      "final_markdown": "## Root cause\nThe most likely root cause is a failure in DNS resolution for the external domain `api.partner.example.com`, specifically indicating that the domain does not exist or cannot be found (NXDOMAIN). This prevented the outbound webhook delivery. Possible reasons include a misconfiguration in the local DNS resolver, an issue with the upstream DNS server being used by the host, or a legitimate deletion or change of the DNS record for `api.partner.example.com` at its authoritative source.\n\n## Suggested actions\n*   Perform a `dig` or `nslookup` for `api.partner.example.com` from the affected host to diagnose the exact DNS server returning NXDOMAIN.\n*   Verify the DNS resolver configuration (`/etc/resolv.conf` or equivalent) on the host experiencing the issue.\n*   Check public DNS records for `api.partner.example.com` using external tools to determine if the domain is globally resolvable.\n*   Investigate any recent changes to network configuration, DNS settings, or firewalls on the host or in the network path to DNS servers.\n\n## Confidence & caveats\nConfidence: 0.4.\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The most likely root cause is a failure in DNS resolution for the external domain `api.partner.example.com`, specifically indicating that the domain does not exist or cannot be found (NXDOMAIN). This prevented the outbound webhook delivery. Possible reasons include a misconfiguration in the local DNS resolver, an issue with the upstream DNS server being used by the host, or a legitimate deletion or change of the DNS record for `api.partner.example.com` at its authoritative source.",
+      "keyword_score": 0.667,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": 0.2963,
+      "latency_s": 17.006,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "reflection_off",
+      "stage_latency_s": {
+        "retrieval_agent": 5.184,
+        "reasoning_agent": 6.542,
+        "memory_update_agent": 5.279
+      },
+      "stage_tokens": {
+        "retrieval_agent": 2598,
+        "reasoning_agent": 3255,
+        "memory_update_agent": 5704
+      },
+      "prompt_tokens": 9114,
+      "output_tokens": 1188,
+      "total_tokens": 11557,
+      "retrieved_ids": [
+        "tls-cert-expired-001",
+        "redis-conn-refused-001",
+        "upstream-timeout-payments-001",
+        "disk-full-log-001",
+        "jvm-oom-heap-001"
+      ],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "ood-rate-limit",
+      "expected_incident_id": null,
+      "final_markdown": "## Root cause\nThe system experienced HTTP 429 errors from the rate limiter because an incoming traffic spike, correlated with a marketing-email blast, exceeded the configured rate limit of 1000/min. This suggests that the rate limit is either set too low for anticipated marketing-driven traffic or there was insufficient coordination and capacity planning for the promotional event. This finding is consistent with `upstream-timeout-payments-001`, which previously identified under-scaling for promotional event traffic as a root cause.\n\n## Suggested actions\n* Review and adjust the rate limiter configuration to accommodate expected traffic from marketing campaigns.\n* Establish a process for marketing to coordinate major email blasts with SRE/Ops to prepare for traffic surges.\n* Analyze historical traffic patterns during past marketing events to better forecast capacity needs.\n* Implement dynamic rate limit adjustments or auto-scaling for the rate-limited service during anticipated high-traffic events.\n\n## Confidence & caveats\nConfidence: 0.9. The overall quality of the hypothesis is high.\n\n## Memory updates\n* `upstream-timeout-payments-001`: 1.0 -> 1.1 (\u0394 0.1)",
+      "extracted_root_cause": "The system experienced HTTP 429 errors from the rate limiter because an incoming traffic spike, correlated with a marketing-email blast, exceeded the configured rate limit of 1000/min. This suggests that the rate limit is either set too low for anticipated marketing-driven traffic or there was insufficient coordination and capacity planning for the promotional event. This finding is consistent with `upstream-timeout-payments-001`, which previously identified under-scaling for promotional event traffic as a root cause.",
+      "keyword_score": 1.0,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": 0.3038,
+      "latency_s": 16.589,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "reflection_off",
+      "stage_latency_s": {
+        "retrieval_agent": 6.209,
+        "reasoning_agent": 5.213,
+        "memory_update_agent": 5.167
+      },
+      "stage_tokens": {
+        "retrieval_agent": 2624,
+        "reasoning_agent": 2954,
+        "memory_update_agent": 5887
+      },
+      "prompt_tokens": 9297,
+      "output_tokens": 1211,
+      "total_tokens": 11465,
+      "retrieved_ids": [
+        "upstream-timeout-payments-001",
+        "jvm-oom-heap-001",
+        "tls-cert-expired-001",
+        "disk-full-log-001",
+        "db-deadlock-001"
+      ],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "ood-feature-flag",
+      "expected_incident_id": null,
+      "final_markdown": "## Root cause\nThe most likely root cause is a NullPointerException within the `FeatureFlagResolver.resolve` method. This error was triggered by the recent rollout of the 'new-checkout-flow' feature flag approximately 5 minutes prior to the errors, suggesting the new feature flag configuration or an associated dependency is missing, incorrectly set, or incompatible. This ultimately caused the resolver to encounter a null value where an object or primitive was expected, leading to 500 errors on all `/api/v3/checkout` requests. No retrieved incidents were directly consistent with this specific root cause.\n\n## Suggested actions\n* Immediately revert the 'new-checkout-flow' feature flag rollout.\n* Inspect the configuration and data associated with the 'new-checkout-flow' feature flag for any missing or null values.\n* Review the code of `FeatureFlagResolver.resolve` for null-safety and defensive programming, especially when retrieving flag values.\n* Add more specific logging or metrics to `FeatureFlagResolver` to capture details about failed resolutions and the problematic flag.\n\n## Confidence & caveats\nConfidence: 0.9. The overall quality of the hypothesis is not explicitly rated in the provided reflection verdict, as it was empty.\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The most likely root cause is a NullPointerException within the `FeatureFlagResolver.resolve` method. This error was triggered by the recent rollout of the 'new-checkout-flow' feature flag approximately 5 minutes prior to the errors, suggesting the new feature flag configuration or an associated dependency is missing, incorrectly set, or incompatible. This ultimately caused the resolver to encounter a null value where an object or primitive was expected, leading to 500 errors on all `/api/v3/checkout` requests. No retrieved incidents were directly consistent with this specific root cause.",
+      "keyword_score": 1.0,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": 0.3076,
+      "latency_s": 17.343,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "reflection_off",
+      "stage_latency_s": {
+        "retrieval_agent": 5.585,
+        "reasoning_agent": 7.14,
+        "memory_update_agent": 4.619
+      },
+      "stage_tokens": {
+        "retrieval_agent": 2601,
+        "reasoning_agent": 3310,
+        "memory_update_agent": 5908
+      },
+      "prompt_tokens": 9498,
+      "output_tokens": 1263,
+      "total_tokens": 11819,
+      "retrieved_ids": [
+        "upstream-timeout-payments-001",
+        "tls-cert-expired-001",
+        "disk-full-log-001",
+        "db-deadlock-001",
+        "redis-conn-refused-001"
+      ],
+      "expected_incident_rank": null
+    }
+  ]
+}

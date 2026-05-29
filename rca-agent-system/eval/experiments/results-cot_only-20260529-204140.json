@@ -1,0 +1,442 @@
+{
+  "summary": {
+    "n": 15,
+    "ablation": "cot_only",
+    "n_in_domain": 12,
+    "n_ood": 3,
+    "keyword_verdict_counts": {
+      "exact": 10,
+      "partial": 5,
+      "miss": 0
+    },
+    "keyword_accuracy_exact_or_partial": 1.0,
+    "expected_incident_retrieval_recall": 0.0,
+    "retrieval_ir": {
+      "n_scored": 0,
+      "recall_at_k": null,
+      "mrr": null,
+      "ndcg_at_k": null,
+      "k": 5
+    },
+    "mean_latency_s": 9.753,
+    "p95_latency_s": 14.744,
+    "mean_stage_latency_s": {
+      "reasoning_agent": 5.217,
+      "memory_update_agent": 4.535
+    },
+    "mean_top_retrieval_similarity": null,
+    "mean_total_tokens": 4407.9,
+    "mean_stage_tokens": {
+      "reasoning_agent": 1263.867,
+      "memory_update_agent": 3144.067
+    },
+    "llm_judge_verdict_counts": null
+  },
+  "results": [
+    {
+      "id": "redis-1",
+      "expected_incident_id": "redis-conn-refused-001",
+      "final_markdown": "## Root cause\nThe most likely root cause is that the Redis server at 10.0.1.100:6379 is not running or is otherwise inaccessible, leading to 'Connection refused' errors. This directly caused the subsequent failure of Batch job #4521 due to cache unavailability.\n\n## Suggested actions\n* Verify the status of the Redis service on host 10.0.1.100.\n* Check network connectivity and firewall rules between the client and Redis server on port 6379.\n* Review the Redis server configuration (e.g., 'bind' directive) on 10.0.1.100.\n* Examine system logs on 10.0.1.100 for any issues related to Redis startup or network interfaces.\n\n## Confidence & caveats\nConfidence: 0.4. The reflection agent did not provide an overall quality verdict.\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The most likely root cause is that the Redis server at 10.0.1.100:6379 is not running or is otherwise inaccessible, leading to 'Connection refused' errors. This directly caused the subsequent failure of Batch job",
+      "keyword_score": 0.6,
+      "keyword_verdict": "partial",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 11.082,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "cot_only",
+      "stage_latency_s": {
+        "reasoning_agent": 6.612,
+        "memory_update_agent": 4.47
+      },
+      "stage_tokens": {
+        "reasoning_agent": 1347,
+        "memory_update_agent": 3204
+      },
+      "prompt_tokens": 3287,
+      "output_tokens": 513,
+      "total_tokens": 4551,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "redis-2",
+      "expected_incident_id": "redis-conn-refused-001",
+      "final_markdown": "## Root cause\nThe most likely root cause is an issue with the Redis server at 10.20.5.12:6379, as indicated by the `ECONNREFUSED` error. This error suggests the Redis service is either not running, misconfigured, or inaccessible from the client. The application then fell back to direct database reads, which subsequently caused a significant spike in read latency.\n\n## Suggested actions\n* Verify the status of the Redis server process on host 10.20.5.12.\n* Check network connectivity and firewall rules between the application and Redis server.\n* Examine the Redis server logs on 10.20.5.12 for any startup errors or service issues.\n* Monitor database performance while Redis is unavailable to ensure the fallback mechanism doesn't cause cascading failures.\n\n## Confidence & caveats\nConfidence: 0.4. The overall quality of the hypothesis could not be determined as the reflection agent's verdict was not provided.\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The most likely root cause is an issue with the Redis server at 10.20.5.12:6379, as indicated by the `ECONNREFUSED` error. This error suggests the Redis service is either not running, misconfigured, or inaccessible from the client. The application then fell back to direct database reads, which subsequently caused a significant spike in read latency.",
+      "keyword_score": 0.5,
+      "keyword_verdict": "partial",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 9.49,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "cot_only",
+      "stage_latency_s": {
+        "reasoning_agent": 5.648,
+        "memory_update_agent": 3.841
+      },
+      "stage_tokens": {
+        "reasoning_agent": 1468,
+        "memory_update_agent": 3156
+      },
+      "prompt_tokens": 3227,
+      "output_tokens": 530,
+      "total_tokens": 4624,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "jvm-oom-1",
+      "expected_incident_id": "jvm-oom-heap-001",
+      "final_markdown": "## Root cause\nThe 'order-processor' service crashed due to a Java OutOfMemoryError (OOM), specifically a 'Java heap space' exhaustion. The JVM terminated because it could not allocate 512MB, leading to the service process being killed (signal 9) and subsequently causing cascading failures for dependent services.\n\n## Suggested actions\n* Review recent code changes or deployments to the 'order-processor' service for potential memory leaks or inefficient memory usage patterns.\n* Analyze the generated core dump (/var/crash/core.4521) or any available heap dumps to identify specific objects consuming excessive memory.\n* Evaluate the current JVM heap size configuration (-Xmx) for the 'order-processor' service and consider increasing it if current allocation is insufficient for legitimate workload demands.\n* Implement or enhance JVM memory usage monitoring (e.g., heap usage, GC activity) for the 'order-processor' service to detect high memory consumption proactively.\n\n## Confidence & caveats\nConfidence: 0.95. The reflection agent did not provide a verdict, so its overall quality assessment is unknown.\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The 'order-processor' service crashed due to a Java OutOfMemoryError (OOM), specifically a 'Java heap space' exhaustion. The JVM terminated because it could not allocate 512MB, leading to the service process being killed (signal 9) and subsequently causing cascading failures for dependent services.",
+      "keyword_score": 0.8,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 8.965,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "cot_only",
+      "stage_latency_s": {
+        "reasoning_agent": 5.564,
+        "memory_update_agent": 3.399
+      },
+      "stage_tokens": {
+        "reasoning_agent": 1393,
+        "memory_update_agent": 3354
+      },
+      "prompt_tokens": 3475,
+      "output_tokens": 585,
+      "total_tokens": 4747,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "jvm-oom-2",
+      "expected_incident_id": "jvm-oom-heap-001",
+      "final_markdown": "## Root cause\nThe application experienced a Java OutOfMemoryError due to exhaustion of the Java heap space, specifically triggered while adding elements to the OrderHistoryCache. This led to the process being terminated by the operating system's OOM-killer. The root cause is likely either a memory leak within the OrderHistoryCache leading to unbounded growth, or an insufficient heap size allocated for the current workload and data volume.\n\n## Suggested actions\n* Analyze the `OrderHistoryCache` implementation for memory leaks or inefficient object management, focusing on its `put` method.\n* Review recent changes to the `OrderHistoryCache` logic or any significant increases in the data volume it handles.\n* Obtain and analyze a heap dump from the application to identify the objects consuming the most memory.\n* Consider increasing the Java heap size (`-Xmx` JVM argument) if the OOM is determined to be due to legitimate increased workload rather than a leak.\n\n## Confidence & caveats\nConfidence: 0.9. No reflection verdict provided.\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The application experienced a Java OutOfMemoryError due to exhaustion of the Java heap space, specifically triggered while adding elements to the OrderHistoryCache. This led to the process being terminated by the operating system's OOM-killer. The root cause is likely either a memory leak within the OrderHistoryCache leading to unbounded growth, or an insufficient heap size allocated for the current workload and data volume.",
+      "keyword_score": 1.0,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 11.015,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "cot_only",
+      "stage_latency_s": {
+        "reasoning_agent": 5.106,
+        "memory_update_agent": 5.909
+      },
+      "stage_tokens": {
+        "reasoning_agent": 1249,
+        "memory_update_agent": 3361
+      },
+      "prompt_tokens": 3272,
+      "output_tokens": 544,
+      "total_tokens": 4610,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "deadlock-1",
+      "expected_incident_id": "db-deadlock-001",
+      "final_markdown": "## Root cause\nA database deadlock occurred during an 'order update' operation, causing the transaction with ID 84771 to be rolled back. Despite multiple retry attempts (3/3), the operation ultimately failed. This indicates contention for database resources, likely specific tables or rows, preventing the 'order update' transaction from completing successfully.\n\n## Suggested actions\n* Examine database logs for `txn_id=84771` to identify the specific SQL statements and tables involved in the deadlock.\n* Analyze the 'order update path' code for potential transaction design issues that could lead to lock contention.\n* Review database indexes and transaction isolation levels for the tables frequently accessed by the 'order update' path.\n* Consider optimizing the 'order update path' to reduce transaction scope or modify query order to prevent future deadlocks.\n\n## Confidence & caveats\nConfidence: 0.8.\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "A database deadlock occurred during an 'order update' operation, causing the transaction with ID 84771 to be rolled back. Despite multiple retry attempts (3/3), the operation ultimately failed. This indicates contention for database resources, likely specific tables or rows, preventing the 'order update' transaction from completing successfully.",
+      "keyword_score": 0.6,
+      "keyword_verdict": "partial",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 8.885,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "cot_only",
+      "stage_latency_s": {
+        "reasoning_agent": 5.694,
+        "memory_update_agent": 3.19
+      },
+      "stage_tokens": {
+        "reasoning_agent": 1353,
+        "memory_update_agent": 2853
+      },
+      "prompt_tokens": 3000,
+      "output_tokens": 454,
+      "total_tokens": 4206,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "deadlock-2",
+      "expected_incident_id": "db-deadlock-001",
+      "final_markdown": "## Root cause\nThe most likely root cause is a database deadlock within PostgreSQL, where multiple transactions are trying to acquire locks on resources held by each other, leading to a circular wait condition. The log specifically indicates that process 1842 is waiting for a ShareLock on transaction 998877, which is a key symptom of such a deadlock.\n\n## Suggested actions\n*   Immediately check the PostgreSQL server logs for the full query details related to transaction 998877 and process 1842, as suggested by the HINT.\n*   Inspect the `pg_stat_activity` and `pg_locks` views in PostgreSQL to identify the queries involved and the exact resources being contended.\n*   Review recent application code changes for transactions that might acquire locks in a different order or hold locks for longer durations.\n*   Analyze query execution plans and consider adding appropriate indexes or optimizing transaction logic to minimize lock contention.\n\n## Confidence & caveats\nConfidence: 0.4. The reflection agent's overall quality verdict is not available as no reflection was provided.\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The most likely root cause is a database deadlock within PostgreSQL, where multiple transactions are trying to acquire locks on resources held by each other, leading to a circular wait condition. The log specifically indicates that process 1842 is waiting for a ShareLock on transaction 998877, which is a key symptom of such a deadlock.",
+      "keyword_score": 1.0,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 9.146,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "cot_only",
+      "stage_latency_s": {
+        "reasoning_agent": 4.595,
+        "memory_update_agent": 4.551
+      },
+      "stage_tokens": {
+        "reasoning_agent": 1160,
+        "memory_update_agent": 3455
+      },
+      "prompt_tokens": 3326,
+      "output_tokens": 576,
+      "total_tokens": 4615,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "upstream-1",
+      "expected_incident_id": "upstream-timeout-payments-001",
+      "final_markdown": "## Root cause\nThe most likely root cause is an unresponsiveness or degradation of the 'payments' upstream service. The initial timeout suggests the 'payments' service is either down, overloaded, or experiencing network connectivity issues. This led to order failures and subsequently triggered a circuit breaker to open due to 18 consecutive failures, indicating a persistent problem with the 'payments' dependency. No retrieved incidents were used in forming this hypothesis.\n\n## Suggested actions\n* Immediately check the health, logs, and resource utilization of the 'payments' service.\n* Investigate network connectivity and latency between the current service and the 'payments' upstream.\n* Review recent deployments or configuration changes applied to the 'payments' service or its dependencies.\n* Monitor the overall error rate and circuit breaker status to observe recovery.\n\n## Confidence & caveats\nConfidence: 0.4. No reflection agent's verdict on overall quality was provided.\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The most likely root cause is an unresponsiveness or degradation of the 'payments' upstream service. The initial timeout suggests the 'payments' service is either down, overloaded, or experiencing network connectivity issues. This led to order failures and subsequently triggered a circuit breaker to open due to 18 consecutive failures, indicating a persistent problem with the 'payments' dependency. No retrieved incidents were used in forming this hypothesis.",
+      "keyword_score": 1.0,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 10.622,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "cot_only",
+      "stage_latency_s": {
+        "reasoning_agent": 5.522,
+        "memory_update_agent": 5.099
+      },
+      "stage_tokens": {
+        "reasoning_agent": 1331,
+        "memory_update_agent": 3156
+      },
+      "prompt_tokens": 3071,
+      "output_tokens": 477,
+      "total_tokens": 4487,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "upstream-2",
+      "expected_incident_id": "upstream-timeout-payments-001",
+      "final_markdown": "## Root cause\nThe most likely root cause is a service-level issue with the `payments-api`, which failed to respond within a 30-second timeout, resulting in an HTTP 504 error. The calling service subsequently exhausted all retry attempts, indicating a persistent problem with reaching or getting a successful response from `payments-api`, ultimately leading to an HTTP 502 being returned to the client.\n\n## Suggested actions\n* Inspect the health and performance metrics of the `payments-api` service around the time of the incident.\n* Review logs from the `payments-api` service for any errors, warnings, or resource saturation.\n* Check for any recent deployments or configuration changes to the `payments-api`.\n* Verify network connectivity and latency between the calling service and `payments-api`.\n\n## Confidence & caveats\nConfidence: 0.4. The reflection agent did not provide an overall quality verdict.\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The most likely root cause is a service-level issue with the `payments-api`, which failed to respond within a 30-second timeout, resulting in an HTTP 504 error. The calling service subsequently exhausted all retry attempts, indicating a persistent problem with reaching or getting a successful response from `payments-api`, ultimately leading to an HTTP 502 being returned to the client.",
+      "keyword_score": 0.8,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 9.078,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "cot_only",
+      "stage_latency_s": {
+        "reasoning_agent": 5.116,
+        "memory_update_agent": 3.962
+      },
+      "stage_tokens": {
+        "reasoning_agent": 1287,
+        "memory_update_agent": 3023
+      },
+      "prompt_tokens": 3156,
+      "output_tokens": 498,
+      "total_tokens": 4310,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "tls-1",
+      "expected_incident_id": "tls-cert-expired-001",
+      "final_markdown": "## Root cause\nThe most likely root cause is an expired SSL/TLS certificate on a critical service, specifically indicated by the 'certificate verify failed (expired)' error during an HTTPS handshake. This certificate expiration is preventing the 'admin-api' health check from succeeding, which subsequently renders the 'Maintenance dashboard unreachable' and blocks deployments.\n\n## Suggested actions\n* Immediately verify the SSL/TLS certificate status on the 'admin-api' endpoint and any dependencies.\n* Renew or replace the expired certificate with a valid one.\n* Restart affected services after the certificate has been updated and verified.\n* Review and improve the automated certificate rotation and monitoring processes to prevent future expirations.\n\n## Confidence & caveats\nConfidence: 0.4. The reflection agent's overall quality verdict is not available.\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The most likely root cause is an expired SSL/TLS certificate on a critical service, specifically indicated by the 'certificate verify failed (expired)' error during an HTTPS handshake. This certificate expiration is preventing the 'admin-api' health check from succeeding, which subsequently renders the 'Maintenance dashboard unreachable' and blocks deployments.",
+      "keyword_score": 1.0,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 8.837,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "cot_only",
+      "stage_latency_s": {
+        "reasoning_agent": 4.924,
+        "memory_update_agent": 3.913
+      },
+      "stage_tokens": {
+        "reasoning_agent": 1147,
+        "memory_update_agent": 2842
+      },
+      "prompt_tokens": 2951,
+      "output_tokens": 428,
+      "total_tokens": 3989,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "tls-2",
+      "expected_incident_id": "tls-cert-expired-001",
+      "final_markdown": "## Root cause\nThe most likely root cause is an expired X.509 certificate that is preventing secure communication, specifically leading to the abortion of synchronization with the internal-api. The certificate's 'notAfter' date has passed the current system time, indicating it is no longer valid. No retrieved incidents were used for this hypothesis.\n\n## Suggested actions\n* Identify the specific X.509 certificate that has expired.\n* Renew or replace the expired certificate with a valid one.\n* Redeploy or restart the affected service to pick up the new certificate.\n* Implement or review certificate expiration monitoring and automated renewal processes.\n\n## Confidence & caveats\nConfidence: 0.95. No reflection agent verdict was provided.\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The most likely root cause is an expired X.509 certificate that is preventing secure communication, specifically leading to the abortion of synchronization with the internal-api. The certificate's 'notAfter' date has passed the current system time, indicating it is no longer valid. No retrieved incidents were used for this hypothesis.",
+      "keyword_score": 0.5,
+      "keyword_verdict": "partial",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 7.207,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "cot_only",
+      "stage_latency_s": {
+        "reasoning_agent": 4.207,
+        "memory_update_agent": 2.999
+      },
+      "stage_tokens": {
+        "reasoning_agent": 1186,
+        "memory_update_agent": 2935
+      },
+      "prompt_tokens": 3087,
+      "output_tokens": 438,
+      "total_tokens": 4121,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "disk-1",
+      "expected_incident_id": "disk-full-log-001",
+      "final_markdown": "## Root cause\nThe most likely root cause is disk exhaustion on the `/var/log` partition. This prevented the service from writing log files and flushing its buffers, ultimately causing it to become stuck. No retrieved incidents were used for this analysis.\n\n## Suggested actions\n*   Verify disk usage on the affected host, specifically for the /var/log filesystem.\n*   Identify and remove or archive old and large log files in /var/log to free up space.\n*   Restart the 'stuck' service after freeing up disk space.\n*   Investigate log rotation policies and consider increasing disk capacity or implementing aggressive log retention.\n\n## Confidence & caveats\nConfidence: 0.95. No reflection agent verdict on overall quality was provided.\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The most likely root cause is disk exhaustion on the `/var/log` partition. This prevented the service from writing log files and flushing its buffers, ultimately causing it to become stuck. No retrieved incidents were used for this analysis.",
+      "keyword_score": 0.5,
+      "keyword_verdict": "partial",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 9.173,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "cot_only",
+      "stage_latency_s": {
+        "reasoning_agent": 4.616,
+        "memory_update_agent": 4.557
+      },
+      "stage_tokens": {
+        "reasoning_agent": 1165,
+        "memory_update_agent": 3002
+      },
+      "prompt_tokens": 2957,
+      "output_tokens": 412,
+      "total_tokens": 4167,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "disk-2",
+      "expected_incident_id": "disk-full-log-001",
+      "final_markdown": "## Root cause\nThe service became unresponsive due to a disk space exhaustion issue, specifically indicated by the 'ENOSPC: no space left on device' error. This prevented the application from performing necessary write operations, leading to its unresponsiveness.\n\n## Suggested actions\n* Immediately check disk usage on the affected host or volume.\n* Identify the largest files or directories that are consuming disk space.\n* Clear unnecessary files (e.g., old logs, temporary files) or increase disk capacity.\n* Investigate the root cause of the disk fill, such as runaway logging or unexpected data growth.\n\n## Confidence & caveats\nConfidence: 0.95. No reflection verdict was provided to assess the overall quality of the hypothesis.\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The service became unresponsive due to a disk space exhaustion issue, specifically indicated by the 'ENOSPC: no space left on device' error. This prevented the application from performing necessary write operations, leading to its unresponsiveness.",
+      "keyword_score": 1.0,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 8.568,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "cot_only",
+      "stage_latency_s": {
+        "reasoning_agent": 4.097,
+        "memory_update_agent": 4.471
+      },
+      "stage_tokens": {
+        "reasoning_agent": 929,
+        "memory_update_agent": 2787
+      },
+      "prompt_tokens": 2704,
+      "output_tokens": 379,
+      "total_tokens": 3716,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "ood-dns",
+      "expected_incident_id": null,
+      "final_markdown": "## Root cause\nThe most likely root cause is a DNS resolution failure for the external partner domain `api.partner.example.com`. The `NXDOMAIN` error indicates that the domain could not be found by the DNS server, directly leading to the outbound webhook delivery being aborted because the third-party endpoint was unresolvable.\n\n## Suggested actions\n* Verify the spelling and correctness of `api.partner.example.com` in the webhook configuration.\n* Manually attempt to resolve `api.partner.example.com` from the affected host using `dig` or `nslookup`.\n* Check the partner's status page or contact them to confirm if `api.partner.example.com` is correct and operational.\n* Investigate the health and configuration of internal DNS resolvers if other known external domains are also failing resolution.\n\n## Confidence & caveats\nConfidence: 0.4. The overall quality of the hypothesis could not be determined due to missing reflection data.\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The most likely root cause is a DNS resolution failure for the external partner domain `api.partner.example.com`. The `NXDOMAIN` error indicates that the domain could not be found by the DNS server, directly leading to the outbound webhook delivery being aborted because the third-party endpoint was unresolvable.",
+      "keyword_score": 0.667,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 8.011,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "cot_only",
+      "stage_latency_s": {
+        "reasoning_agent": 4.218,
+        "memory_update_agent": 3.792
+      },
+      "stage_tokens": {
+        "reasoning_agent": 1113,
+        "memory_update_agent": 2922
+      },
+      "prompt_tokens": 3024,
+      "output_tokens": 501,
+      "total_tokens": 4035,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "ood-rate-limit",
+      "expected_incident_id": null,
+      "final_markdown": "## Root cause\nThe system encountered HTTP 429 errors due to an inbound traffic spike, directly correlated with a marketing email blast. This surge in requests exceeded the configured rate limiter's threshold of 1000 requests per minute, leading to a denial of service for some users during the blast. This indicates a gap in coordination between marketing campaign planning and system capacity/rate limit management.\n\n## Suggested actions\n*   Confirm if the marketing email blast is still active and if the traffic spike persists.\n*   Coordinate with the marketing team to establish a process for advance notification of large campaigns.\n*   Review and adjust the rate limiter configuration to accommodate expected traffic surges from marketing events.\n*   Investigate options for dynamic scaling or burst capacity specifically for marketing-driven traffic spikes.\n\n## Confidence & caveats\nConfidence: 0.9. The reflection agent's overall quality verdict is not available.\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The system encountered HTTP 429 errors due to an inbound traffic spike, directly correlated with a marketing email blast. This surge in requests exceeded the configured rate limiter's threshold of 1000 requests per minute, leading to a denial of service for some users during the blast. This indicates a gap in coordination between marketing campaign planning and system capacity/rate limit management.",
+      "keyword_score": 1.0,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 14.744,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "cot_only",
+      "stage_latency_s": {
+        "reasoning_agent": 6.798,
+        "memory_update_agent": 7.946
+      },
+      "stage_tokens": {
+        "reasoning_agent": 1641,
+        "memory_update_agent": 3848
+      },
+      "prompt_tokens": 3002,
+      "output_tokens": 470,
+      "total_tokens": 5489,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "ood-feature-flag",
+      "expected_incident_id": null,
+      "final_markdown": "## Root cause\nThe most likely root cause is a NullPointerException within the FeatureFlagResolver.resolve method, which started impacting the /api/v3/checkout endpoint, leading to 500 errors. This issue is strongly correlated with the recent deployment of the 'new-checkout-flow' feature flag, which occurred approximately 5 minutes before the errors were observed.\n\n## Suggested actions\n*   Immediately roll back the 'new-checkout-flow' feature flag.\n*   Investigate the NullPointerException in FeatureFlagResolver.resolve related to the 'new-checkout-flow' flag.\n*   Review the code changes associated with the 'new-checkout-flow' feature flag.\n*   Add more robust error handling for feature flag resolution failures.\n\n## Confidence & caveats\nConfidence: 0.9. No reflection verdict was available to further assess the hypothesis quality.\n\n## Memory updates\nNo memory changes applied.",
+      "extracted_root_cause": "The most likely root cause is a NullPointerException within the FeatureFlagResolver.resolve method, which started impacting the /api/v3/checkout endpoint, leading to 500 errors. This issue is strongly correlated with the recent deployment of the 'new-checkout-flow' feature flag, which occurred approximately 5 minutes before the errors were observed.",
+      "keyword_score": 0.667,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 11.476,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "cot_only",
+      "stage_latency_s": {
+        "reasoning_agent": 5.544,
+        "memory_update_agent": 5.932
+      },
+      "stage_tokens": {
+        "reasoning_agent": 1189,
+        "memory_update_agent": 3263
+      },
+      "prompt_tokens": 3119,
+      "output_tokens": 477,
+      "total_tokens": 4452,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    }
+  ]
+}
