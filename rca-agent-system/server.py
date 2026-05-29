@@ -72,6 +72,13 @@ app.router.routes = [
 ]
 
 
+# Mount the evaluation-console API (/eval/*). Import here (after the ADK
+# app is built) so the registry/job modules load lazily alongside the app.
+from rca_system.eval_api.routes import router as eval_router  # noqa: E402
+
+app.include_router(eval_router)
+
+
 @app.get("/health", tags=["meta"])
 async def health() -> dict[str, str]:
     """Readiness probe.
