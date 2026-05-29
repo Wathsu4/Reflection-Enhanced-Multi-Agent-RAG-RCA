@@ -224,19 +224,43 @@ and is gitignored (`classifier-service/models/` in `.gitignore`).
   - `POST /run` and `POST /run_sse` — ADK-mounted, SSE for streaming
   - `POST /apps/rca_system/users/{user}/sessions/{id}` — create/fetch session
   - `POST /demo/reset-memory` — **gated by `ALLOW_DEMO_RESET=1`** (else 403). Wipes ChromaDB and reseeds.
+  - `/eval/*` — the evaluation console API (see below), mounted via
+    `app.include_router(...)` from `rca_system/eval_api/routes.py`.
 - **Seed data:** 6 markdown incidents in `seed/incidents/`
   (redis, jvm, deadlock, upstream, tls, disk). YAML frontmatter +
   body. `scripts/seed_knowledge_base.py` upserts by `incident_id` so
   re-running is safe.
 - **Eval:** 15 scenarios in `eval/incidents.jsonl` (12 in-domain,
   3 out-of-distribution). `scripts/evaluate.py` does keyword-overlap
-  scoring (default) or LLM-as-judge with `--llm-judge`.
-  `scripts/evaluate_memory_evolution.py` is the headline novelty
-  experiment (score drift across runs). Outputs land in `eval/`.
-- **Tests:** 11 files, ~85 functions, covering pipeline composition,
-  tools, ChromaDB wrapper, server routes, seed/reset scripts,
-  evaluation helpers. Tests use FakeEmbeddingFunction so no model
-  downloads.
+  scoring (default) or LLM-as-judge with `--llm-judge`, **plus** per-stage
+  latency, Gemini token counts, and the retrieval IR triad
+  (Recall@k/MRR/nDCG). Both eval scripts accept
+  `--ablation {none,reflection_off,memory_frozen,no_rag,cot_only,retrieval_only}`
+  (variants defined in `rca_system/ablations.py`) and
+  `--progress-json` (emit JSONL lifecycle events for the UI). Non-default
+  ablations write to `eval/experiments/`; the full system writes to
+  `eval/` (demo-ready). `scripts/evaluate_memory_evolution.py` is the
+  headline novelty experiment (score drift across runs).
+- **Eval console API (`rca_system/eval_api/`):** browse / re-run /
+  inspect experiments from the frontend.
+  - `registry.py` — declarative metadata for every experiment (id, title,
+    RQ tags, plain + technical descriptions, command, param schema,
+    `status` runnable|planned, outputs glob). **Single source of truth**;
+    adding an experiment is a one-entry change.
+  - `jobs.py` — `JobManager`: **single-flight** subprocess runner. Spawns
+    `uv run python scripts/...`, **sandboxes ChromaDB** to
+    `data/eval-runs/<job-id>/` (seeded fresh, so the live/demo memory is
+    never mutated), tails `--progress-json` output, supports cancel, and
+    mirrors job state to `eval/experiments/.jobs/<id>.json`.
+  - `routes.py` — `GET /eval/experiments[/{id}]`,
+    `POST /eval/experiments/{id}/run` (409 if a job is running),
+    `GET /eval/jobs[/{id}]`, `POST /eval/jobs/{id}/cancel`,
+    `GET /eval/results/{id}/{file}` (path-traversal-guarded). **Runs are
+    not gated** (always allowed) but serialised; reads are always allowed.
+- **Tests:** pipeline composition, tools, ChromaDB wrapper, server routes,
+  seed/reset scripts, evaluation helpers, ablation factory, and the eval
+  console (registry / routes / job lifecycle with a mocked subprocess).
+  Tests use FakeEmbeddingFunction so no model downloads.
 
 ---
 
@@ -252,9 +276,14 @@ and is gitignored (`classifier-service/models/` in `.gitignore`).
   - `/monitoring` — log simulator + auto-RCA queue for ERROR/FATAL chunks
   - `/incidents` — local history of recent runs (localStorage)
   - `/incidents/[id]` — replay a saved ADK session
+  - `/evaluation` — evaluation console: cards for every experiment (grouped
+    by RQ/family), rendered from the backend registry
+  - `/evaluation/[id]` — per-experiment page: plain + technical description,
+    params form, re-run control, polled live progress, results + history
 - **API clients (`frontend/src/lib/api/`):**
   - `classifier.ts` — `classify`, `getClassifierHealth`, `generateLogs` + typed error classes; optional keyword-mock fallback (`NEXT_PUBLIC_USE_MOCK=true`).
   - `agents.ts` — `getAgentHealth`, `createSession`, `getSession`, `listSessions`, **`runAgentSSE`** (custom POST-SSE async generator), `parseSseBlock` (exported for tests).
+  - `evaluation.ts` — `listExperiments`, `getExperiment`, `runExperiment`, `getJob`, `cancelJob`, `getResult` against the `/eval/*` API. Mirrors `agents.ts` conventions (typed error classes, `fetchJson`, `__test__` exports). Job progress is **polled** (TanStack Query `refetchInterval`), not SSE.
 - **Why custom SSE?** ADK's `/run_sse` is **POST with a JSON body**,
   so the browser `EventSource` API (GET-only) does not work. The
   generator uses `fetch` + `ReadableStream.getReader()` + `TextDecoder`,

@@ -351,18 +351,104 @@ Choices made on 2026-05-24 to bound execution:
 | Output location | `rca-agent-system/eval/experiments/` — kept separate from the demo-ready `eval/results-*.md` and `eval/memory-evolution-*.md`. |
 | RAGAS implementation | **Re-implement the three metrics ourselves (~150 LoC)** — no new transitive dependency, full control over prompts, easier to integrate with the existing `--llm-judge` Gemini call style. |
 
+Choices made on 2026-05-29:
+
+| Question | Decision |
+|---|---|
+| Day-1 plumbing scope | **Done** — `--ablation {none,reflection_off,memory_frozen,no_rag,cot_only,retrieval_only}` on both eval scripts (factory in `rca_system/ablations.py`), per-stage latency + token counting, retrieval IR triad (Recall@k/MRR/nDCG), outputs routed to `eval/experiments/`. |
+| E4.3 | **Deferred** for now (no self-annotation pass yet); other automated P0 experiments proceed. |
+| Rate-limit handling | **Retry-on-429** during the real runs (assume quota is sufficient / paid tier). |
+| In-product eval UI | **Build it** (see §12). Each experiment gets its own page describing what it evaluates (plain + technical), a re-run control, live progress, and rendered results. |
+
 ### Concrete next-action queue
 
 The P0 set, sequenced for incremental review:
 
-1. **Plumbing pass (`Day 1`, deferred until you say go).**
-   - `scripts/evaluate.py`: add `--ablation {none, reflection_off, memory_frozen, no_rag, retrieval_only, cot_only}` flag and per-stage timers + token counting.
-   - `scripts/evaluate_memory_evolution.py`: same ablation flag.
-   - `eval/experiments/` directory + a README explaining what lives there.
-2. **Ablation matrix (`Day 2`).** Run E1.1, E1.2, E1.4 + the two baselines E2.1, E2.2 — produces one comparative table.
-3. **Quality metrics (`Day 3`).** Implement the RAGAS triad (E4.1) and the pairwise-with-bias-mitigation judge (E4.2). Build the CLI annotator. Run all three on the ablation outputs from Day 2.
-4. **Memory experiments (`Day 4–5`).** E3.1 (5-run bootstrap), E3.2 (craft the adversarial scenario), E3.5 (rank-lift over the 5 runs).
-5. **Operational + classifier closers (`Day 6`).** E6.3 (cost-vs-volume sim, no Gemini needed), E7.1 (lift the classifier P/R/F1 into the main report).
-6. **Writeup (`Day 7`).** Consolidate everything in `eval/experiments/SUMMARY.md` with the thesis-ready table per RQ.
+1. **Plumbing pass (`Day 1`).** ✅ **Done.** `--ablation` flag on both scripts,
+   per-stage timers, token counting, retrieval IR metrics (E4.4 compute),
+   `eval/experiments/` directory + README.
+2. **Evaluation UI (`§12`).** ⏳ In progress — in-product console so every
+   experiment is browsable, re-runnable, and self-describing.
+3. **Ablation matrix (`Day 2`).** Run E1.1, E1.2, E1.4 + the two baselines E2.1, E2.2 — produces one comparative table. (Runnable via CLI **or** the new UI.)
+4. **Quality metrics (`Day 3`).** Implement the RAGAS triad (E4.1) and the pairwise-with-bias-mitigation judge (E4.2). (E4.3 deferred.) Run on the ablation outputs.
+5. **Memory experiments (`Day 4–5`).** E3.1 (5-run bootstrap), E3.2 (craft the adversarial scenario), E3.5 (rank-lift over the 5 runs).
+6. **Operational + classifier closers (`Day 6`).** E6.3 (cost-vs-volume sim, no Gemini needed), E7.1 (lift the classifier P/R/F1 into the main report).
+7. **Writeup (`Day 7`).** Consolidate everything in `eval/experiments/SUMMARY.md` with the thesis-ready table per RQ.
 
-This plan is **paused here** — no code changes yet — until you signal "go".
+---
+
+## 12. Family 8 — In-product evaluation console (UI)
+
+A new **Evaluation** tab in the Next.js frontend. The motivation: the
+thesis defense is far more convincing if every experiment can be
+re-run live and explains itself, rather than being a pile of CLI scripts
+and markdown files. This is an **evaluation-infrastructure** family, not
+a new research claim — it surfaces Families 1–7 to the operator.
+
+### Requirements
+
+- A dedicated tab; one page per experiment.
+- Each page describes, in **plain English and technical terms**, what the
+  experiment evaluates and which RQ/RO it defends.
+- A **re-run** control with tunable parameters (e.g. `--limit`,
+  `--llm-judge`, ablation variant is fixed per card).
+- **Live progress** while a run executes.
+- **Rendered results** (summary metrics + per-scenario table) and a
+  **history** of past runs.
+- New experiments must slot in **without frontend changes**.
+
+### Architecture decisions (locked 2026-05-29)
+
+| Decision | Choice | Rationale |
+|---|---|---|
+| Execution model | **Subprocess** — the server spawns `uv run python scripts/...` | Isolation; doesn't block the live server event loop; cancellable; exactly reproduces the CLI. |
+| KB isolation | **Sandbox per run** — `CHROMA_PERSIST_DIR=./data/eval-runs/<job>`, seeded fresh | Eval runs mutate `success_score`; sandboxing keeps the live/demo memory untouched and runs reproducible. |
+| Run gating | **None** — runs are always allowed, but **single-flight** (one at a time) | Gemini rate limits + sandbox seeding make concurrent runs unsafe; a 409-on-busy lock suffices. |
+| Progress transport | **Polling** (`GET /eval/jobs/{id}`, ~2 s) | Per-scenario cadence is ~30–60 s; polling is simpler and reconnection-safe. |
+| Card scope | **Runnable + planned** | Implemented experiments are runnable; not-yet-built P0 experiments show as disabled "planned" cards so the console tells the whole story. |
+
+### Single source of truth: the experiment registry
+
+`rca_system/eval_api/registry.py` declares every experiment:
+`id, title, rq_tags, family (PLAN id), summary, description_plain,
+description_technical, command, params_schema, gemini_cost_note,
+expected_runtime, outputs_glob, status (runnable|planned)`. The UI renders
+cards and detail pages entirely from this registry, so adding an
+experiment later is a one-entry change (plus a script if it's new).
+
+### Backend (`rca-agent-system`)
+
+```
+rca_system/eval_api/
+  registry.py   # experiment metadata + param schemas
+  jobs.py       # JobManager: single-flight subprocess runner, sandbox seed,
+                # status/log tail, cancel; mirrors state to eval/experiments/.jobs/
+  routes.py     # APIRouter, included from server.py
+```
+
+Endpoints: `GET /eval/experiments`, `GET /eval/experiments/{id}`,
+`POST /eval/experiments/{id}/run` (409 if busy), `GET /eval/jobs[/{id}]`,
+`POST /eval/jobs/{id}/cancel`, `GET /eval/results/{id}/{file}`
+(path-traversal-guarded to `eval/experiments/`). The eval scripts gain a
+`--progress-json` flag that emits one JSON line per lifecycle event
+(`run_start`/`scenario_done`/`run_done`) for the runner to surface.
+
+### Frontend (`frontend`, Next.js 16)
+
+- Nav entry **"Evaluation"**; `/evaluation` landing (cards grouped by
+  RQ/family) and `/evaluation/[id]` detail (descriptions, params form, run
+  controls, polling progress, results, history).
+- `src/lib/api/evaluation.ts` (mirrors `agents.ts`), hooks
+  `useExperiments` / `useExperimentRun` / `useEvalResults`, components under
+  `src/components/evaluation/`. Vitest + jsdom tests with `vi.mock`.
+
+### Phasing
+
+- **U0** docs (this section + AGENTS.md). **U1** backend (registry, jobs,
+  routes, `--progress-json`, tests). **U2** frontend landing + client/hook
+  + nav. **U3** detail page (params, run, polling). **U4** results +
+  history. **U5** static classifier-metrics card (E7.1).
+
+This plan is **active** — Day-1 plumbing is done; the evaluation UI (§12)
+is being built before the Day-2 ablation matrix so the matrix can be run
+from the console.
