@@ -10,6 +10,7 @@ import {
   Activity,
   Bot,
   ClipboardList,
+  FlaskConical,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ServiceStatusPill } from "@/components/service-status-pill";
@@ -85,6 +86,13 @@ export default function RootLayout({
                     >
                       <ClipboardList className="h-4 w-4" />
                       Incident History
+                    </Link>
+                    <Link
+                      href="/evaluation"
+                      className="flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary"
+                    >
+                      <FlaskConical className="h-4 w-4" />
+                      Evaluation
                     </Link>
                   </nav>
                 </div>
