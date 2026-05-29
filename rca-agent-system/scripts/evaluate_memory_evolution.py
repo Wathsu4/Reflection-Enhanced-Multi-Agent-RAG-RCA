@@ -44,10 +44,22 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from rca_system.ablations import ABLATIONS, DETERMINISTIC_ABLATIONS, build_root_agent  # noqa: E402
 from rca_system.memory.chroma_store import IncidentMemory  # noqa: E402
 
 EVAL_DIR = PROJECT_ROOT / "eval"
+# Non-default ablation runs are experiments; keep them out of the
+# demo-ready eval/memory-evolution-*.md reports.
+EXPERIMENTS_DIR = EVAL_DIR / "experiments"
 DEFAULT_DATASET = EVAL_DIR / "incidents.jsonl"
+
+
+def _emit_progress(enabled: bool, **fields: Any) -> None:
+    """Emit one compact JSON lifecycle line to stdout when `--progress-json`
+    is set, for the eval-console JobManager. Human logging stays on stderr."""
+    if not enabled:
+        return
+    print(json.dumps(fields, default=str), flush=True)
 
 
 def _load_in_domain(path: Path) -> list[dict[str, Any]]:
@@ -80,20 +92,20 @@ def _snapshot_scores() -> dict[str, float]:
     return out
 
 
-async def _run_pipeline(scenario: dict[str, Any]) -> bool:
-    """Execute the pipeline for one scenario. Returns True on success."""
+async def _run_pipeline(scenario: dict[str, Any], ablation: str = "none") -> bool:
+    """Execute the pipeline variant for one scenario. Returns True on success."""
     from google.adk.runners import Runner
     from google.adk.sessions import InMemorySessionService
     from google.genai.types import Content, Part
 
-    from rca_system.agent import root_agent
+    agent = build_root_agent(ablation)
 
     session_service = InMemorySessionService()
     session = await session_service.create_session(
         app_name="rca_system", user_id="memory-eval"
     )
     runner = Runner(
-        agent=root_agent,
+        agent=agent,
         app_name="rca_system",
         session_service=session_service,
     )
@@ -116,7 +128,9 @@ async def _run_pipeline(scenario: dict[str, Any]) -> bool:
 
 
 def _render_report(
-    snapshots: list[dict[str, float]], scenario_ids: list[str]
+    snapshots: list[dict[str, float]],
+    scenario_ids: list[str],
+    ablation: str = "none",
 ) -> str:
     headers = ["incident_id"] + [f"after run {i}" for i in range(len(snapshots))]
     headers[0] = "incident_id"
@@ -131,6 +145,7 @@ def _render_report(
 
     lines: list[str] = []
     lines.append("# Memory-evolution evaluation\n")
+    lines.append(f"Pipeline variant (ablation): **{ablation}**\n")
     lines.append(
         f"Ran the in-domain subset ({len(scenario_ids)} scenarios) "
         f"through the pipeline {len(snapshots) - 1} time(s). Scores below "
@@ -179,31 +194,77 @@ async def amain(args: argparse.Namespace) -> int:
     scenarios = _load_in_domain(args.dataset)
     if args.limit > 0:
         scenarios = scenarios[: args.limit]
+    progress = args.progress_json
+    n = len(scenarios)
+    total_steps = n * args.runs
     print(
-        f"Memory-evolution eval: {len(scenarios)} scenarios, "
-        f"{args.runs} run(s)",
+        f"Memory-evolution eval: {n} scenarios, {args.runs} run(s)",
         file=sys.stderr,
     )
+    _emit_progress(
+        progress,
+        event="run_start",
+        kind="memory_evolution",
+        total=total_steps,
+        scenarios=n,
+        runs=args.runs,
+        ablation=args.ablation,
+    )
 
+    step = 0
     snapshots: list[dict[str, float]] = [_snapshot_scores()]
     for run_idx in range(1, args.runs + 1):
         print(f"\n=== run {run_idx}/{args.runs} ===", file=sys.stderr)
         for i, sc in enumerate(scenarios, 1):
-            print(
-                f"  [{i}/{len(scenarios)}] {sc['id']}",
-                file=sys.stderr,
-                flush=True,
+            step += 1
+            print(f"  [{i}/{n}] {sc['id']}", file=sys.stderr, flush=True)
+            _emit_progress(
+                progress,
+                event="scenario_start",
+                i=step,
+                n=total_steps,
+                id=sc["id"],
+                run=run_idx,
             )
-            await _run_pipeline(sc)
+            ok = await _run_pipeline(sc, ablation=args.ablation)
+            _emit_progress(
+                progress,
+                event="scenario_done",
+                i=step,
+                n=total_steps,
+                id=sc["id"],
+                run=run_idx,
+                error=None if ok else "pipeline_error",
+            )
         snapshots.append(_snapshot_scores())
 
-    EVAL_DIR.mkdir(exist_ok=True)
     timestamp = time.strftime("%Y%m%d-%H%M%S")
-    md = _render_report(snapshots, [sc["id"] for sc in scenarios])
-    md_path = EVAL_DIR / f"memory-evolution-{timestamp}.md"
+    md = _render_report(snapshots, [sc["id"] for sc in scenarios], args.ablation)
+    if args.ablation == "none":
+        out_dir = EVAL_DIR
+        stem = f"memory-evolution-{timestamp}"
+    else:
+        out_dir = EXPERIMENTS_DIR
+        stem = f"memory-evolution-{args.ablation}-{timestamp}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    md_path = out_dir / f"{stem}.md"
     md_path.write_text(md, encoding="utf-8")
     print(f"\nWrote {md_path}", file=sys.stderr)
-    print(md)
+    # Drift summary for the run_done event.
+    baseline, final = snapshots[0], snapshots[-1]
+    drift = {
+        "boosted": sum(1 for k, v in final.items() if v > baseline.get(k, 1.0)),
+        "demoted": sum(1 for k, v in final.items() if v < baseline.get(k, 1.0)),
+        "unchanged": sum(1 for k, v in final.items() if v == baseline.get(k, 1.0)),
+    }
+    _emit_progress(
+        progress,
+        event="run_done",
+        summary={"drift": drift, "snapshots": snapshots},
+        md_path=str(md_path),
+    )
+    if not progress:
+        print(md)
     return 0
 
 
@@ -234,7 +295,31 @@ def main(argv: list[str] | None = None) -> int:
         help="Don't wipe + reseed before measuring (use this if you "
              "want to observe drift on top of an existing state).",
     )
+    parser.add_argument(
+        "--ablation",
+        choices=ABLATIONS,
+        default="none",
+        help=(
+            "Pipeline variant (default: none = full system). Useful "
+            "contrasts here are reflection_off and memory_frozen, which "
+            "should show flat score drift vs the full pipeline. Non-default "
+            "variants write to eval/experiments/."
+        ),
+    )
+    parser.add_argument(
+        "--progress-json",
+        action="store_true",
+        help=(
+            "Emit machine-readable JSONL lifecycle events to stdout for the "
+            "evaluation console to render live progress."
+        ),
+    )
     args = parser.parse_args(argv)
+    if args.ablation in DETERMINISTIC_ABLATIONS:
+        parser.error(
+            f"--ablation {args.ablation} performs no LLM call and never "
+            "mutates memory, so it has no meaningful score drift to measure."
+        )
     return asyncio.run(amain(args))
 
 
