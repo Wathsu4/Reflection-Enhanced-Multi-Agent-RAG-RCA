@@ -15,6 +15,7 @@ import {
 import { ThemeToggle } from "@/components/theme-toggle";
 import { ServiceStatusPill } from "@/components/service-status-pill";
 import { AgentStatusPill } from "@/components/agent-status-pill";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -39,6 +40,7 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <QueryProvider>
+            <TooltipProvider>
             <div className="grid min-h-screen w-full md:grid-cols-[220px_1fr] lg:grid-cols-[280px_1fr]">
               <aside className="hidden border-r bg-muted/40 md:block">
                 <div className="flex h-full max-h-screen flex-col gap-2">
@@ -113,6 +115,7 @@ export default function RootLayout({
                 </main>
               </div>
             </div>
+            </TooltipProvider>
           </QueryProvider>
         </ThemeProvider>
       </body>

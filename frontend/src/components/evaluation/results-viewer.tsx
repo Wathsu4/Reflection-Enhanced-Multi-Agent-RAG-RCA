@@ -4,7 +4,9 @@ import { FileText, Loader2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { MarkdownView } from "@/components/agents/MarkdownView";
+import { MetricLabel } from "@/components/evaluation/metric-label";
 import { Badge } from "@/components/ui/badge";
+import type { MetricKey } from "@/lib/eval/metric-info";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -60,10 +62,24 @@ interface ParsedResultFile {
 
 // -------------------- small presentational bits --------------------
 
-function Metric({ label, value }: { label: string; value: React.ReactNode }) {
+function Metric({
+  label,
+  value,
+  metricKey,
+}: {
+  label: string;
+  value: React.ReactNode;
+  metricKey?: MetricKey;
+}) {
   return (
     <div className="rounded border bg-muted/30 p-2">
-      <div className="text-[11px] text-muted-foreground">{label}</div>
+      <div className="text-[11px] text-muted-foreground">
+        {metricKey ? (
+          <MetricLabel metricKey={metricKey}>{label}</MetricLabel>
+        ) : (
+          label
+        )}
+      </div>
       <div className="font-mono text-sm">{value}</div>
     </div>
   );
@@ -81,37 +97,41 @@ export function ResultSummaryGrid({ summary }: { summary: ResultSummary }) {
       className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4"
       data-testid="result-summary"
     >
-      <Metric label="Scenarios" value={summary.n} />
+      <Metric label="Scenarios" metricKey="scenarios" value={summary.n} />
       <Metric
         label="Keyword acc (exact+partial)"
+        metricKey="keyword_acc"
         value={fmt(summary.keyword_accuracy_exact_or_partial, 2)}
       />
       {vc && (
         <Metric
           label="Verdicts (E/P/M)"
+          metricKey="keyword_verdict"
           value={`${vc.exact}/${vc.partial}/${vc.miss}`}
         />
       )}
       {summary.expected_incident_retrieval_recall !== undefined && (
         <Metric
           label="Retrieval recall"
+          metricKey="retrieval_recall"
           value={fmt(summary.expected_incident_retrieval_recall, 2)}
         />
       )}
       {ir && ir.recall_at_k !== null && (
         <>
-          <Metric label={`Recall@${ir.k}`} value={fmt(ir.recall_at_k, 2)} />
-          <Metric label="MRR" value={fmt(ir.mrr, 2)} />
-          <Metric label={`nDCG@${ir.k}`} value={fmt(ir.ndcg_at_k, 2)} />
+          <Metric label={`Recall@${ir.k}`} metricKey="recall_at_k" value={fmt(ir.recall_at_k, 2)} />
+          <Metric label="MRR" metricKey="mrr" value={fmt(ir.mrr, 2)} />
+          <Metric label={`nDCG@${ir.k}`} metricKey="ndcg" value={fmt(ir.ndcg_at_k, 2)} />
         </>
       )}
-      <Metric label="Mean latency (s)" value={fmt(summary.mean_latency_s, 2)} />
+      <Metric label="Mean latency (s)" metricKey="mean_latency" value={fmt(summary.mean_latency_s, 2)} />
       {summary.mean_total_tokens != null && (
-        <Metric label="Mean tokens" value={fmt(summary.mean_total_tokens, 0)} />
+        <Metric label="Mean tokens" metricKey="mean_tokens" value={fmt(summary.mean_total_tokens, 0)} />
       )}
       {summary.mean_top_retrieval_similarity != null && (
         <Metric
           label="Mean top sim"
+          metricKey="mean_top_sim"
           value={fmt(summary.mean_top_retrieval_similarity, 3)}
         />
       )}
@@ -126,14 +146,14 @@ export function ScenarioTable({ rows }: { rows: ScenarioRow[] }) {
       <table className="w-full border-collapse text-xs">
         <thead>
           <tr className="border-b text-left text-muted-foreground">
-            <th className="px-2 py-1">id</th>
-            <th className="px-2 py-1">verdict</th>
-            <th className="px-2 py-1">kw</th>
-            <th className="px-2 py-1">top sim</th>
-            <th className="px-2 py-1">rank</th>
-            <th className="px-2 py-1">latency</th>
-            <th className="px-2 py-1">tokens</th>
-            <th className="px-2 py-1">judge</th>
+            <th className="px-2 py-1"><MetricLabel metricKey="scenario_id">id</MetricLabel></th>
+            <th className="px-2 py-1"><MetricLabel metricKey="keyword_verdict">verdict</MetricLabel></th>
+            <th className="px-2 py-1"><MetricLabel metricKey="keyword_score">kw</MetricLabel></th>
+            <th className="px-2 py-1"><MetricLabel metricKey="top_sim">top sim</MetricLabel></th>
+            <th className="px-2 py-1"><MetricLabel metricKey="expected_rank">rank</MetricLabel></th>
+            <th className="px-2 py-1"><MetricLabel metricKey="latency">latency</MetricLabel></th>
+            <th className="px-2 py-1"><MetricLabel metricKey="tokens">tokens</MetricLabel></th>
+            <th className="px-2 py-1"><MetricLabel metricKey="llm_judge">judge</MetricLabel></th>
           </tr>
         </thead>
         <tbody className="font-mono">

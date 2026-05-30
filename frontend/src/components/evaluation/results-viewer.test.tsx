@@ -3,10 +3,12 @@
  * canned JSON / markdown payloads and assert the structured renderers and
  * history list behave.
  */
+import type { ReactElement } from "react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
+import { TooltipProvider } from "@/components/ui/tooltip";
 import type { ResultEntry } from "@/lib/api/evaluation";
 
 const useEvalResultMock = vi.hoisted(() => vi.fn());
@@ -16,6 +18,11 @@ vi.mock("@/lib/hooks/useEvalResult", () => ({
 }));
 
 import { ResultsViewer } from "./results-viewer";
+
+// Metric labels use Radix tooltips, which require a TooltipProvider
+// ancestor (supplied app-wide by the root layout in production).
+const renderRV = (ui: ReactElement) =>
+  render(<TooltipProvider>{ui}</TooltipProvider>);
 
 const JSON_RESULT = JSON.stringify({
   summary: {
@@ -57,7 +64,7 @@ describe("<ResultsViewer />", () => {
 
   it("shows an empty state when there are no results", () => {
     useEvalResultMock.mockReturnValue({ data: undefined, isLoading: false, isError: false });
-    render(<ResultsViewer results={[]} />);
+    renderRV(<ResultsViewer results={[]} />);
     expect(screen.getByTestId("no-results")).toBeInTheDocument();
   });
 
@@ -67,7 +74,7 @@ describe("<ResultsViewer />", () => {
       isLoading: false,
       isError: false,
     });
-    render(<ResultsViewer results={[entry()]} />);
+    renderRV(<ResultsViewer results={[entry()]} />);
     expect(screen.getByTestId("result-summary")).toBeInTheDocument();
     expect(screen.getByTestId("scenario-table")).toBeInTheDocument();
     expect(screen.getByText("redis-1")).toBeInTheDocument();
@@ -81,7 +88,7 @@ describe("<ResultsViewer />", () => {
       isLoading: false,
       isError: false,
     });
-    render(
+    renderRV(
       <ResultsViewer
         results={[entry({ json_path: null, markdown_path: "memory-evolution-1.md" })]}
       />,
@@ -95,7 +102,7 @@ describe("<ResultsViewer />", () => {
       isLoading: false,
       isError: false,
     });
-    render(
+    renderRV(
       <ResultsViewer
         results={[
           entry({ timestamp_ts: 1_700_000_500, json_path: "experiments/results-no_rag-2.json", markdown_path: null }),
