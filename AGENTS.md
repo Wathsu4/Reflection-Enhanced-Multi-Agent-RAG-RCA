@@ -235,12 +235,18 @@ and is gitignored (`classifier-service/models/` in `.gitignore`).
   scoring (default) or LLM-as-judge with `--llm-judge`, **plus** per-stage
   latency, Gemini token counts, and the retrieval IR triad
   (Recall@k/MRR/nDCG). Both eval scripts accept
-  `--ablation {none,reflection_off,memory_frozen,no_rag,cot_only,retrieval_only}`
+  `--ablation {none,reflection_off,memory_frozen,no_rag,cot_only,retrieval_only,react}`
   (variants defined in `rca_system/ablations.py`) and
   `--progress-json` (emit JSONL lifecycle events for the UI). Non-default
   ablations write to `eval/experiments/`; the full system writes to
-  `eval/` (demo-ready). `scripts/evaluate_memory_evolution.py` is the
-  headline novelty experiment (score drift across runs).
+  `eval/` (demo-ready). `react` is a single **ReAct** agent (adaptive
+  retrieval loop, no reflection/memory) — the standard agentic baseline
+  (Yao 2022; Roy et al. FSE'24); a different topology, not a pipeline clone,
+  so fixed-pipeline retrieval-rank metrics don't apply to it.
+  `scripts/evaluate_memory_evolution.py` is the headline novelty experiment
+  (score drift across runs); `scripts/evaluate_pairwise.py` and
+  `scripts/evaluate_ragas.py` add the bias-mitigated A/B judge and the RAG
+  triad.
 - **Eval console API (`rca_system/eval_api/`):** browse / re-run /
   inspect experiments from the frontend.
   - `registry.py` — declarative metadata for every experiment (id, title,

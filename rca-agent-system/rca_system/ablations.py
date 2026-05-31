@@ -75,6 +75,7 @@ ABLATIONS: tuple[str, ...] = (
     "no_rag",
     "cot_only",
     "retrieval_only",
+    "react",
 )
 
 # Variants that perform no LLM call and so have no ADK agent to run.
@@ -128,6 +129,102 @@ def _build_memory_update_agent_frozen() -> Agent:
     )
 
 
+# ---- ReAct (Reason + Act) single-agent baseline ----
+# A standard agentic baseline: Yao et al. 2022 (arXiv:2210.03629); the design
+# Roy et al. (FSE'24, Microsoft, arXiv:2403.04123) evaluate for RCA; and the
+# predecessor that Reflexion (Shinn et al. 2023) -- which our reflection +
+# memory design descends from -- builds on. It interleaves reasoning with
+# adaptive tool calls in a single agent, with NO fixed pipeline, NO reflection,
+# and NO cross-incident memory, so it isolates "adaptive single agent" from our
+# "multi-agent + reflection + memory" approach.
+
+# Hard cap on retrieve_incidents calls per run: bounds cost and prevents a
+# runaway reason-act loop. Belt-and-suspenders with the instruction's limit.
+_REACT_MAX_TOOL_CALLS = 3
+
+_REACT_INSTRUCTION = (
+    "You are an autonomous SRE root-cause-analysis agent using the ReAct "
+    "(Reason + Act) strategy. You operate in a loop: THINK about what the "
+    "symptoms suggest, optionally ACT by calling a tool to gather evidence, "
+    "OBSERVE the result, and repeat until you can confidently explain the "
+    "incident.\n"
+    "\n"
+    "Tool available:\n"
+    "  retrieve_incidents(query, k): semantic search over a knowledge base of "
+    "past incidents. Returns hits with incident_id, title, root_cause, "
+    "resolution, similarity, and success_score.\n"
+    "\n"
+    "How to operate:\n"
+    "1. Read the user's log chunk.\n"
+    "2. THINK: briefly note the key symptoms (error messages, components, "
+    "codes) and what evidence would help.\n"
+    "3. ACT: if past incidents would help, call retrieve_incidents with a "
+    "focused query. If the first results are weak, you may refine the query "
+    "and call again -- but call it AT MOST 3 times in total.\n"
+    "4. OBSERVE the returned incidents; decide whether you have enough.\n"
+    "5. When confident (or once retrieval is exhausted), STOP calling tools "
+    "and write the final report.\n"
+    "\n"
+    "Final report -- output ONLY this Markdown, using EXACTLY these three "
+    "level-2 headings, in this order:\n"
+    "\n"
+    "## Root cause\n"
+    "  1-3 sentences naming the most likely root cause. Cite any incident_ids "
+    "you relied on inline (e.g. 'consistent with redis-conn-refused-001'). If "
+    "retrieval did not help, say so and diagnose from the log alone.\n"
+    "\n"
+    "## Suggested actions\n"
+    "  2-4 concrete next steps for the on-call engineer, as a bulleted list.\n"
+    "\n"
+    "## Confidence & caveats\n"
+    "  One short paragraph: your confidence and any uncertainty.\n"
+    "\n"
+    "Do not invent details that are not supported by the log or the retrieved "
+    "incidents."
+)
+
+
+def _react_tool_call_cap(tool: Any, args: dict[str, Any], tool_context: Any) -> Any:
+    """`before_tool_callback` enforcing `_REACT_MAX_TOOL_CALLS`.
+
+    Returns `None` to allow the call; once the budget is spent it short-
+    circuits the tool with an empty result that tells the agent to answer
+    now (so a misbehaving model can't loop indefinitely or burn quota).
+    """
+    used = int(tool_context.state.get("_react_tool_calls", 0))
+    if used >= _REACT_MAX_TOOL_CALLS:
+        return {
+            "hits": [],
+            "note": (
+                f"Retrieval budget of {_REACT_MAX_TOOL_CALLS} calls exhausted. "
+                "Do not call retrieve_incidents again; write your final report now."
+            ),
+        }
+    tool_context.state["_react_tool_calls"] = used + 1
+    return None
+
+
+def build_react_agent() -> Agent:
+    """Single ReAct agent: same model + retrieval tool + KB as the full
+    system, but it decides when/whether to retrieve and writes the report
+    itself. No reflection, no memory writes. Output obeys the same report
+    contract so it scores on the same metrics."""
+    from rca_system.tools.retrieve_incidents import retrieve_incidents
+
+    return Agent(
+        name="rca_react_agent",
+        model=settings.gemini_model,
+        description=(
+            "ReAct single-agent baseline: interleaves reasoning with adaptive "
+            "retrieval, then writes the RCA report."
+        ),
+        instruction=_REACT_INSTRUCTION,
+        tools=[FunctionTool(func=retrieve_incidents)],
+        before_tool_callback=_react_tool_call_cap,
+        output_key="final_output",
+    )
+
+
 def build_root_agent(ablation: str = "none") -> Any:
     """Return the agent to run for `ablation`, or `None` for deterministic
     baselines (`retrieval_only`).
@@ -148,6 +245,11 @@ def build_root_agent(ablation: str = "none") -> Any:
 
     if ablation in DETERMINISTIC_ABLATIONS:
         return None
+
+    if ablation == "react":
+        # Single-agent ReAct baseline (not a clone of the pipeline -- a
+        # different topology). Built fresh, so no single-parent conflict.
+        return build_react_agent()
 
     # Build fresh clones of the sub-agent singletons so the ablation
     # pipeline never collides with `root_agent`'s single-parent claim.

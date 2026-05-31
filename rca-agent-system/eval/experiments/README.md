@@ -41,9 +41,20 @@ Defined in `rca_system/ablations.py`. All are prompt/wiring changes only
 | `no_rag` | reasoning → memory_update (no retrieval) | value of RAG over pure LLM reasoning | E1.4 |
 | `cot_only` | identical to `no_rag`, framed as a baseline | "is the LLM good enough without retrieval?" | E2.2 |
 | `retrieval_only` | deterministic top-k, **no LLM** | zero-hallucination floor any variant must beat | E2.1 |
+| `react` | single ReAct agent: adaptive `retrieve_incidents` loop, then writes the report | reflection + memory (multi-agent) vs a standard single agent | E2.3 (ReAct) |
 
 `retrieval_only` performs no Gemini call, so it is rejected by the
 memory-evolution script (it never mutates memory).
+
+`react` is a **different topology** (one LLM agent that decides when to
+retrieve), not a clone of the `SequentialAgent` pipeline — see
+`build_react_agent()` in `rca_system/ablations.py`. It is the standard
+agentic baseline (Yao et al. 2022; evaluated for RCA by Roy et al. FSE'24;
+the predecessor Reflexion builds on). It is compared on end-to-end quality
+(keyword overlap, pairwise judge, RAGAS) and cost (latency, tokens,
+tool-calls); the fixed-pipeline retrieval-rank metrics (Recall@k / MRR /
+nDCG) do not apply because retrieval is adaptive, so they show blank for
+`react`.
 
 ## How to regenerate
 
@@ -51,9 +62,12 @@ From `rca-agent-system/`:
 
 ```bash
 # One pipeline-accuracy report per variant (writes here).
-for v in reflection_off memory_frozen no_rag cot_only retrieval_only; do
+for v in reflection_off memory_frozen no_rag cot_only retrieval_only react; do
   uv run python scripts/evaluate.py --ablation "$v"
 done
+
+# Headline architecture comparison: reflection+memory vs a ReAct agent.
+uv run python scripts/evaluate_pairwise.py --variant-a none --variant-b react
 # Full system (writes to ../, the demo-ready location):
 uv run python scripts/evaluate.py
 

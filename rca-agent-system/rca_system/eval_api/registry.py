@@ -310,6 +310,39 @@ EXPERIMENTS: list[Experiment] = [
         gemini_cost_note="~2 Gemini calls/scenario.",
         expected_runtime="~5–8 min for all 15.",
     ),
+    Experiment(
+        id="baseline-react",
+        title="Baseline: ReAct agent (Reason + Act)",
+        summary="A standard single-agent that adaptively retrieves in a loop.",
+        description_plain=(
+            "The standard 'agentic' approach: one AI agent that thinks, decides "
+            "for itself when to look up similar past incidents, reads what it "
+            "finds, and repeats until confident — then writes the answer. Unlike "
+            "our system it has no separate critic and no memory that carries "
+            "between incidents. Comparing it to the full system asks the key "
+            "question: does our reflection + learning-memory design beat a "
+            "strong, conventional agent?"
+        ),
+        description_technical=(
+            "ReAct (Yao et al. 2022): a single LLM agent interleaving reasoning "
+            "with adaptive `retrieve_incidents` tool calls (capped) until it "
+            "answers — same model, tool, and KB as the full system, but no "
+            "fixed pipeline, no reflection, no cross-incident memory. This is "
+            "the design Roy et al. (FSE'24) evaluate for RCA and the predecessor "
+            "Reflexion builds on, so it is the most defensible single-agent "
+            "comparator for RQ2/RQ3. Quality is judged via keyword overlap, the "
+            "pairwise judge, and RAGAS; fixed-pipeline retrieval-rank metrics do "
+            "not apply (retrieval is adaptive)."
+        ),
+        rq_tags=["RQ2", "RQ3"],
+        family="E2.3 (ReAct)",
+        script="evaluate",
+        base_args=["--ablation", "react"],
+        params=[_LIMIT_PARAM, _LLM_JUDGE_PARAM],
+        outputs_glob="experiments/results-react-*.json",
+        gemini_cost_note="~2–4 Gemini calls/scenario (adaptive; tool-call capped).",
+        expected_runtime="~6–10 min for all 15.",
+    ),
     # ---- Memory evolution (the novelty) ----
     Experiment(
         id="memory-evolution",

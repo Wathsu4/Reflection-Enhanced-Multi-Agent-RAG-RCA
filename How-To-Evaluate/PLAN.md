@@ -176,7 +176,7 @@ least 3.
 |---|---|---|---|---|
 | **E2.1** | **Retrieval-only baseline (RB)** | Top-k retrieval; return the top hit's summary as the "RCA" with no LLM call. Cheap, deterministic, zero-hallucination. This is the *floor* — anything we do must beat this. | S | **P0** |
 | **E2.2** | **CoT-only baseline (no RAG)** | Same as E1.4 architecturally, but separately framed in the table as a "baseline" rather than an ablation. Helps Q&A: "is the LLM just good enough without our retrieval?". | S | **P0** |
-| E2.3 | Reflexion-style single-agent | Single Gemini agent that calls retrieval, reasons, then verbally reflects in the same prompt context (no separate `SequentialAgent`, no per-incident scoring). This is the prior-art "verbal RL" baseline. Defends our multi-agent + numerical-score design over the 2023 Reflexion baseline. | M | P1 |
+| **E2.3** | **ReAct single-agent baseline** ✅ **DONE** | A single ADK `LlmAgent` (`build_react_agent` in `rca_system/ablations.py`, `--ablation react`) that interleaves reasoning with adaptive `retrieve_incidents` tool calls (capped), then writes the report — same model/tool/KB, but no fixed pipeline, no reflection, no cross-incident memory. This is **the** standard agentic RCA baseline (Yao et al. 2022 ReAct; Roy et al. FSE'24 evaluate exactly this for RCA; the predecessor Reflexion builds on it). Replaces the originally-planned "Reflexion-style single agent" with the more standard, more defensible ReAct comparator. Compared on quality (keyword, pairwise judge, RAGAS) + cost (latency/tokens/tool-calls); fixed-pipeline retrieval-rank metrics N/A (adaptive retrieval). Headline comparison: **pairwise `none` vs `react`**. | M | **P1→done** |
 | E2.4 | Similarity-only RAG | Equivalent to E1.3 but framed as a baseline; isolates the value of `× success_score` re-ranking. | S | P2 |
 
 ### Family 3 — Memory evolution (the novelty)
@@ -359,6 +359,14 @@ Choices made on 2026-05-29:
 | E4.3 | **Deferred** for now (no self-annotation pass yet); other automated P0 experiments proceed. |
 | Rate-limit handling | **Retry-on-429** during the real runs (assume quota is sufficient / paid tier). |
 | In-product eval UI | **Build it** (see §12). Each experiment gets its own page describing what it evaluates (plain + technical), a re-run control, live progress, and rendered results. |
+
+Choices made on 2026-05-31:
+
+| Question | Decision |
+|---|---|
+| Day-3 quality metrics | **Done** — RAGAS triad (E4.1) and bias-mitigated pairwise judge (E4.2) implemented + run; E6.3 cost-vs-volume + E7.1 classifier metrics live. E4.3 still deferred. |
+| ReAct baseline (E2.3) | **Add it.** A single ReAct agent is the standard agentic RCA baseline (Yao 2022; Roy et al. FSE'24) and the predecessor Reflexion builds on, so it is the most defensible single-agent comparator for RQ2/RQ3 — stronger than CoT-only. Implemented as `--ablation react` (different topology, not a pipeline clone), runs through the full eval arsenal for free. Headline: pairwise `none` vs `react`. |
+| Metric tooltips | **Added** — every results-view metric has a hover tooltip (what / example / better / range) for at-a-glance interpretation. |
 
 ### Concrete next-action queue
 
