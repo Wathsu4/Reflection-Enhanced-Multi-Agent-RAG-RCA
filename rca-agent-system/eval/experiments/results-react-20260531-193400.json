@@ -1,0 +1,410 @@
+{
+  "summary": {
+    "n": 15,
+    "ablation": "react",
+    "n_in_domain": 12,
+    "n_ood": 3,
+    "keyword_verdict_counts": {
+      "exact": 12,
+      "partial": 3,
+      "miss": 0
+    },
+    "keyword_accuracy_exact_or_partial": 1.0,
+    "expected_incident_retrieval_recall": 0.0,
+    "retrieval_ir": {
+      "n_scored": 0,
+      "recall_at_k": null,
+      "mrr": null,
+      "ndcg_at_k": null,
+      "k": 5
+    },
+    "mean_latency_s": 7.669,
+    "p95_latency_s": 16.271,
+    "mean_stage_latency_s": {
+      "rca_react_agent": 7.669
+    },
+    "mean_top_retrieval_similarity": null,
+    "mean_total_tokens": 2692.2,
+    "mean_stage_tokens": {
+      "rca_react_agent": 2692.2
+    },
+    "llm_judge_verdict_counts": null
+  },
+  "results": [
+    {
+      "id": "redis-1",
+      "expected_incident_id": "redis-conn-refused-001",
+      "final_markdown": "## Root cause\nThe most likely root cause is a network connectivity issue, specifically a firewall rule change blocking access to the Redis server on port 6379, consistent with redis-conn-refused-001. This prevented the application from connecting to Redis, leading to the \"Connection refused\" and \"Cache unavailable\" errors.\n\n## Suggested actions\n*   Verify network connectivity from the application host (10.0.1.100) to the Redis server on port 6379.\n*   Check recent firewall rule changes that might affect the subnet where the application is running.\n*   Inspect the Redis server status to ensure it is running and listening on port 6379.\n*   Implement a dedicated monitoring probe for Redis connectivity.\n\n## Confidence & caveats\nI am highly confident in this diagnosis due to the direct \"Connection refused\" error explicitly mentioning Redis and the strong similarity to a past incident with the same symptoms and a clear root cause related to firewall rules. The log snippet provided is very specific and aligns well with the most relevant past incident.",
+      "extracted_root_cause": "The most likely root cause is a network connectivity issue, specifically a firewall rule change blocking access to the Redis server on port 6379, consistent with redis-conn-refused-001. This prevented the application from connecting to Redis, leading to the \"Connection refused\" and \"Cache unavailable\" errors.",
+      "keyword_score": 1.0,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 11.901,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "react",
+      "stage_latency_s": {
+        "rca_react_agent": 11.901
+      },
+      "stage_tokens": {
+        "rca_react_agent": 2427
+      },
+      "prompt_tokens": 2017,
+      "output_tokens": 252,
+      "total_tokens": 2427,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "redis-2",
+      "expected_incident_id": "redis-conn-refused-001",
+      "final_markdown": "## Root cause\nThe most likely root cause is a network connectivity issue preventing the application from reaching the Redis instance on `10.20.5.12:6379`, consistent with `redis-conn-refused-001`. This often stems from an improperly configured firewall rule or network ACL blocking port 6379, or the Redis service itself not running on that host/port. The application's fallback to direct database reads subsequently caused a significant spike in read latency.\n\n## Suggested actions\n*   Verify that the Redis service is running on `10.20.5.12:6379`.\n*   Check firewall rules and network security groups/ACLs between the application subnet and `10.20.5.12` to ensure port 6379 is open.\n*   Attempt to connect to Redis from the application host using `redis-cli` or `telnet` to diagnose network path issues.\n*   Review recent network configuration changes that might have impacted connectivity to the Redis host.\n\n## Confidence & caveats\nI am highly confident in this diagnosis, given the explicit `ECONNREFUSED` error for Redis and the strong match with a past incident involving firewall rules. The subsequent increase in read latency directly supports the hypothesis that the application could not utilize Redis as intended.",
+      "extracted_root_cause": "The most likely root cause is a network connectivity issue preventing the application from reaching the Redis instance on `10.20.5.12:6379`, consistent with `redis-conn-refused-001`. This often stems from an improperly configured firewall rule or network ACL blocking port 6379, or the Redis service itself not running on that host/port. The application's fallback to direct database reads subsequently caused a significant spike in read latency.",
+      "keyword_score": 0.5,
+      "keyword_verdict": "partial",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 4.598,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "react",
+      "stage_latency_s": {
+        "rca_react_agent": 4.598
+      },
+      "stage_tokens": {
+        "rca_react_agent": 2423
+      },
+      "prompt_tokens": 1961,
+      "output_tokens": 313,
+      "total_tokens": 2423,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "jvm-oom-1",
+      "expected_incident_id": "jvm-oom-heap-001",
+      "final_markdown": "## Root cause\nThe root cause is likely a Java Virtual Machine (JVM) heap space exhaustion, as indicated by the \"Out of memory: Java heap space\" error. This caused the 'order-processor' service to crash. This is consistent with `jvm-oom-heap-001`, where the heap size was too small for peak volume and an unbounded cache led to memory growth.\n\n## Suggested actions\n*   Increase the JVM heap size (`-Xmx` parameter) for the 'order-processor' service.\n*   Investigate the 'order-processor' application for potential memory leaks or unbounded data structures (e.g., caches, lists) that could be consuming excessive memory.\n*   Implement monitoring for JVM heap usage to proactively identify when memory consumption approaches critical levels.\n*   Analyze core dump `/var/crash/core.4521` for further insights into memory usage patterns.\n\n## Confidence & caveats\nI am highly confident in this diagnosis, as the log messages directly point to a Java heap space issue and a very similar incident (`jvm-oom-heap-001`) provided a clear analogous scenario and resolution. The primary caveat is that without direct access to the application's code or full memory diagnostics, the exact cause of memory growth (e.g., a specific cache or data structure) is inferred rather than definitively proven.",
+      "extracted_root_cause": "The root cause is likely a Java Virtual Machine (JVM) heap space exhaustion, as indicated by the \"Out of memory: Java heap space\" error. This caused the 'order-processor' service to crash. This is consistent with `jvm-oom-heap-001`, where the heap size was too small for peak volume and an unbounded cache led to memory growth.",
+      "keyword_score": 1.0,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 4.779,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "react",
+      "stage_latency_s": {
+        "rca_react_agent": 4.779
+      },
+      "stage_tokens": {
+        "rca_react_agent": 2519
+      },
+      "prompt_tokens": 2046,
+      "output_tokens": 312,
+      "total_tokens": 2519,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "jvm-oom-2",
+      "expected_incident_id": "jvm-oom-heap-001",
+      "final_markdown": "## Root cause\nThe root cause is a `java.lang.OutOfMemoryError: Java heap space` due to the application exhausting its allocated memory, specifically within the `OrderHistoryCache.put` method. This strongly suggests an unbounded or excessively large cache growing beyond the available heap, consistent with `jvm-oom-heap-001`. The process was subsequently OOM-killed by the operating system.\n\n## Suggested actions\n*   Increase the JVM heap size (`-Xmx` parameter) for the affected application.\n*   Investigate the `OrderHistoryCache` implementation for unbounded growth and implement a size cap or more aggressive eviction policy.\n*   Analyze memory usage patterns of the application to determine typical and peak heap requirements.\n*   Set up monitoring for JVM heap usage to proactively detect similar issues before they lead to an outage.\n\n## Confidence & caveats\nI am highly confident in this diagnosis. The log messages directly point to a Java heap space exhaustion, and the `OrderHistoryCache.put` method is explicitly called out. The retrieved incident `jvm-oom-heap-001` provides a near-perfect match, describing an identical problem with a similar component (order-history cache) and suggesting relevant solutions.",
+      "extracted_root_cause": "The root cause is a `java.lang.OutOfMemoryError: Java heap space` due to the application exhausting its allocated memory, specifically within the `OrderHistoryCache.put` method. This strongly suggests an unbounded or excessively large cache growing beyond the available heap, consistent with `jvm-oom-heap-001`. The process was subsequently OOM-killed by the operating system.",
+      "keyword_score": 1.0,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 5.172,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "react",
+      "stage_latency_s": {
+        "rca_react_agent": 5.171
+      },
+      "stage_tokens": {
+        "rca_react_agent": 2464
+      },
+      "prompt_tokens": 1967,
+      "output_tokens": 286,
+      "total_tokens": 2464,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "deadlock-1",
+      "expected_incident_id": "db-deadlock-001",
+      "final_markdown": "## Root cause\nThe incident was caused by a database deadlock, consistent with `db-deadlock-001`. This typically occurs when two or more transactions acquire locks on resources in different orders, leading to a circular dependency where each transaction is waiting for the other to release a lock. The log indicates this happened during an \"order update path\".\n\n## Suggested actions\n*   Analyze the application code paths involved in order updates to identify any transactions that acquire locks in different orders.\n*   Refactor the code to ensure a consistent, canonical order for acquiring locks across all relevant transactions.\n*   Implement retry logic with exponential backoff for deadlock errors, if not already in place, to handle transient deadlocks gracefully.\n*   Monitor database metrics related to deadlocks and transaction concurrency to identify recurring patterns or increased frequency.\n\n## Confidence & caveats\nI am highly confident in this diagnosis, primarily based on the explicit \"Deadlock detected\" error message in the logs and the strong match with `db-deadlock-001`. The root cause and suggested actions are directly informed by the similar past incident.",
+      "extracted_root_cause": "The incident was caused by a database deadlock, consistent with `db-deadlock-001`. This typically occurs when two or more transactions acquire locks on resources in different orders, leading to a circular dependency where each transaction is waiting for the other to release a lock. The log indicates this happened during an \"order update path\".",
+      "keyword_score": 0.6,
+      "keyword_verdict": "partial",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 10.111,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "react",
+      "stage_latency_s": {
+        "rca_react_agent": 10.111
+      },
+      "stage_tokens": {
+        "rca_react_agent": 2406
+      },
+      "prompt_tokens": 1957,
+      "output_tokens": 267,
+      "total_tokens": 2406,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "deadlock-2",
+      "expected_incident_id": "db-deadlock-001",
+      "final_markdown": "## Root cause\nThe incident is caused by a database deadlock, consistent with `db-deadlock-001`. This likely occurred because two or more concurrent transactions attempted to acquire locks on the same resources in different orders, leading to a circular dependency and preventing further progress. The `ShareLock` detail suggests a contention for shared resources.\n\n## Suggested actions\n*   Review recent code deployments for any changes in database transaction logic, especially regarding the order of lock acquisition.\n*   Identify the SQL queries involved in the deadlock by checking the server logs for query details, as hinted in the error message.\n*   Analyze the transaction patterns of the application to identify competing code paths that might be acquiring locks on resources in a non-canonical order.\n*   Refactor the problematic code paths to ensure a consistent and canonical order of lock acquisition for all shared resources.\n\n## Confidence & caveats\nI am highly confident in this diagnosis, primarily based on the explicit \"deadlock detected\" error message and the strong similarity to `db-deadlock-001` which describes a classic database deadlock scenario due to inconsistent lock ordering. The main caveat is that without the actual queries from the server log, the specific tables or rows involved in the deadlock cannot be pinpointed.",
+      "extracted_root_cause": "The incident is caused by a database deadlock, consistent with `db-deadlock-001`. This likely occurred because two or more concurrent transactions attempted to acquire locks on the same resources in different orders, leading to a circular dependency and preventing further progress. The `ShareLock` detail suggests a contention for shared resources.",
+      "keyword_score": 0.75,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 5.275,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "react",
+      "stage_latency_s": {
+        "rca_react_agent": 5.274
+      },
+      "stage_tokens": {
+        "rca_react_agent": 2425
+      },
+      "prompt_tokens": 1960,
+      "output_tokens": 286,
+      "total_tokens": 2425,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "upstream-1",
+      "expected_incident_id": "upstream-timeout-payments-001",
+      "final_markdown": "## Root cause\nThe most likely root cause is that the upstream 'payments' service is experiencing capacity issues, leading to timeouts and subsequent activation of a circuit breaker. This is consistent with incident `upstream-timeout-payments-001`, where the payments service was under-scaled for traffic during a promotional event.\n\n## Suggested actions\n*   Immediately investigate the current load and resource utilization of the 'payments' service.\n*   Check for any recent deployments or changes to the 'payments' service or its dependencies that might impact performance.\n*   Review recent traffic patterns to identify any unexpected spikes or increases that could be overwhelming the 'payments' service.\n*   Consider temporarily increasing the capacity of the 'payments' service to alleviate the immediate pressure.\n\n## Confidence & caveats\nI am highly confident in this diagnosis, given the direct match with the `upstream-timeout-payments-001` incident and the clear log messages indicating timeouts and circuit breaker activation specifically for the 'payments' service. The caveat is that while under-scaling is a strong candidate, other issues like network connectivity problems or internal service errors within 'payments' could also lead to timeouts, although capacity is the most direct explanation for widespread timeouts leading to circuit breaker activation.",
+      "extracted_root_cause": "The most likely root cause is that the upstream 'payments' service is experiencing capacity issues, leading to timeouts and subsequent activation of a circuit breaker. This is consistent with incident `upstream-timeout-payments-001`, where the payments service was under-scaled for traffic during a promotional event.",
+      "keyword_score": 1.0,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 5.604,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "react",
+      "stage_latency_s": {
+        "rca_react_agent": 5.604
+      },
+      "stage_tokens": {
+        "rca_react_agent": 2580
+      },
+      "prompt_tokens": 2126,
+      "output_tokens": 275,
+      "total_tokens": 2580,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "upstream-2",
+      "expected_incident_id": "upstream-timeout-payments-001",
+      "final_markdown": "## Root cause\nThe most likely root cause is that the `payments-api` service is experiencing high load or unresponsiveness, leading to timeouts (HTTP 504) and eventual failure to process requests. This is consistent with `upstream-timeout-payments-001`, where the payments service was under-scaled and caused timeouts during a promotional event.\n\n## Suggested actions\n*   Check the current load and resource utilization of the `payments-api` service.\n*   Review recent deployments or configuration changes to `payments-api` that might impact performance.\n*   Examine `payments-api` service logs for any internal errors or performance bottlenecks.\n*   Consider temporarily rerouting traffic or implementing a circuit breaker if the `payments-api` service remains unhealthy.\n\n## Confidence & caveats\nI am highly confident in this diagnosis, primarily due to the direct match with `upstream-timeout-payments-001`. The logs clearly indicate a timeout from the `payments-api` service, which is the exact symptom described in the past incident.",
+      "extracted_root_cause": "The most likely root cause is that the `payments-api` service is experiencing high load or unresponsiveness, leading to timeouts (HTTP 504) and eventual failure to process requests. This is consistent with `upstream-timeout-payments-001`, where the payments service was under-scaled and caused timeouts during a promotional event.",
+      "keyword_score": 0.8,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 6.28,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "react",
+      "stage_latency_s": {
+        "rca_react_agent": 6.281
+      },
+      "stage_tokens": {
+        "rca_react_agent": 2745
+      },
+      "prompt_tokens": 2156,
+      "output_tokens": 256,
+      "total_tokens": 2745,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "tls-1",
+      "expected_incident_id": "tls-cert-expired-001",
+      "final_markdown": "## Root cause\nThe primary root cause of the incident is an expired TLS certificate, which led to HTTPS handshake failures. This prevented the admin-api from establishing secure connections, causing health-check failures and subsequently blocking deployment due to the maintenance dashboard being unreachable (consistent with tls-cert-expired-001).\n\n## Suggested actions\n*   Immediately renew or replace the expired TLS certificate for the admin-api.\n*   Verify the certificate's expiry date and ensure proper installation across all affected components.\n*   Implement proactive monitoring and alerting for certificate expiry, with warnings at least 30, 14, and 7 days prior to expiration.\n*   Investigate why the certificate was not renewed automatically, checking any cron jobs or automation platforms responsible for certificate management.\n\n## Confidence & caveats\nHigh confidence. The log explicitly states \"certificate verify failed (expired)\" and \"HTTPS handshake failed\", directly pointing to an expired TLS certificate. The retrieved incident `tls-cert-expired-001` further reinforces this diagnosis.",
+      "extracted_root_cause": "The primary root cause of the incident is an expired TLS certificate, which led to HTTPS handshake failures. This prevented the admin-api from establishing secure connections, causing health-check failures and subsequently blocking deployment due to the maintenance dashboard being unreachable (consistent with tls-cert-expired-001).",
+      "keyword_score": 0.8,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 15.32,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "react",
+      "stage_latency_s": {
+        "rca_react_agent": 15.32
+      },
+      "stage_tokens": {
+        "rca_react_agent": 2492
+      },
+      "prompt_tokens": 1941,
+      "output_tokens": 252,
+      "total_tokens": 2492,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "tls-2",
+      "expected_incident_id": "tls-cert-expired-001",
+      "final_markdown": "## Root cause\nThe root cause is an expired x509 certificate used for communication with the internal-api, leading to synchronization failures. This is consistent with `tls-cert-expired-001`, where a certificate expired due to a failed auto-renewal process.\n\n## Suggested actions\n*   Immediately renew or replace the expired x509 certificate for the internal-api.\n*   Investigate the certificate renewal process to determine why the certificate was not renewed automatically, checking cron jobs or automation platforms.\n*   Implement proactive monitoring and alerting for certificate expiry dates to prevent future occurrences (e.g., 30, 14, and 7 days prior to expiration).\n*   Verify the certificate configuration on all relevant systems communicating with the internal-api.\n\n## Confidence & caveats\nI am highly confident in this diagnosis, as the log message \"x509: certificate has expired or is not yet valid\" directly points to the issue, and the `tls-cert-expired-001` incident provides a strong precedent and likely root cause.",
+      "extracted_root_cause": "The root cause is an expired x509 certificate used for communication with the internal-api, leading to synchronization failures. This is consistent with `tls-cert-expired-001`, where a certificate expired due to a failed auto-renewal process.",
+      "keyword_score": 1.0,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 5.22,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "react",
+      "stage_latency_s": {
+        "rca_react_agent": 5.219
+      },
+      "stage_tokens": {
+        "rca_react_agent": 2378
+      },
+      "prompt_tokens": 1949,
+      "output_tokens": 254,
+      "total_tokens": 2378,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "disk-1",
+      "expected_incident_id": "disk-full-log-001",
+      "final_markdown": "## Root cause\nThe incident was caused by a full disk, specifically the `/var/log` partition, leading to the inability to write log files and subsequent service unresponsiveness. This is consistent with `disk-full-log-001`, where unrotated application logs filled the disk.\n\n## Suggested actions\n*   Immediately clear space on the `/var/log` partition by removing old log files.\n*   Implement `logrotate` or a similar log management solution for the application to prevent future disk exhaustion.\n*   Set up proactive monitoring and alerting for disk usage on the `/var/log` partition, with a threshold around 85-90%.\n*   Investigate which specific application is generating excessive log data and consider adjusting its logging levels if appropriate.\n\n## Confidence & caveats\nI am highly confident in this diagnosis, as the log messages directly indicate a \"no space left on device\" error and \"100% disk usage\" on `/var/log`, which is strongly corroborated by a past incident with an identical root cause and resolution.",
+      "extracted_root_cause": "The incident was caused by a full disk, specifically the `/var/log` partition, leading to the inability to write log files and subsequent service unresponsiveness. This is consistent with `disk-full-log-001`, where unrotated application logs filled the disk.",
+      "keyword_score": 0.5,
+      "keyword_verdict": "partial",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 5.245,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "react",
+      "stage_latency_s": {
+        "rca_react_agent": 5.245
+      },
+      "stage_tokens": {
+        "rca_react_agent": 2459
+      },
+      "prompt_tokens": 1982,
+      "output_tokens": 258,
+      "total_tokens": 2459,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "disk-2",
+      "expected_incident_id": "disk-full-log-001",
+      "final_markdown": "## Root cause\nThe most likely root cause is an application or system process filling the disk, leading to an \"ENOSPC: no space left on device\" error and subsequently rendering the service unresponsive. This is consistent with incident disk-full-log-001, which identified unrotated application log files as the cause of a disk filling up to 100%.\n\n## Suggested actions\n*   Identify the files or directories consuming the most disk space using tools like `du -sh *` or `df -h`.\n*   Check for unrotated log files or excessive log verbosity if log files are the culprit. Implement log rotation or adjust logging levels.\n*   Clear unnecessary files to free up disk space.\n*   Implement disk usage monitoring and alerts to proactively detect high disk utilization before it impacts service availability.\n\n## Confidence & caveats\nI am highly confident in this diagnosis, as the error messages directly indicate a disk space issue, and the retrieved incident provides a strong precedent with a similar root cause and symptoms. The primary caveat is that while log files are a common culprit, other factors could also lead to disk exhaustion.",
+      "extracted_root_cause": "The most likely root cause is an application or system process filling the disk, leading to an \"ENOSPC: no space left on device\" error and subsequently rendering the service unresponsive. This is consistent with incident disk-full-log-001, which identified unrotated application log files as the cause of a disk filling up to 100%.",
+      "keyword_score": 1.0,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 6.009,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "react",
+      "stage_latency_s": {
+        "rca_react_agent": 6.009
+      },
+      "stage_tokens": {
+        "rca_react_agent": 2330
+      },
+      "prompt_tokens": 1880,
+      "output_tokens": 262,
+      "total_tokens": 2330,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "ood-dns",
+      "expected_incident_id": null,
+      "final_markdown": "## Root cause\nThe root cause is a DNS resolution failure for `api.partner.example.com`, indicated by the `NXDOMAIN` error. This means that the queried domain name does not exist, or the DNS server authoritative for `api.partner.example.com` is not responding or incorrectly configured to state the domain doesn't exist. This directly led to the outbound webhook delivery being aborted.\n\n## Suggested actions\n*   Verify the spelling of `api.partner.example.com`.\n*   Confirm with the partner that `api.partner.example.com` is the correct and active endpoint for webhook delivery.\n*   Perform a manual DNS lookup (e.g., using `dig` or `nslookup`) for `api.partner.example.com` from the affected system to confirm the `NXDOMAIN` error and investigate if it's a local or global DNS issue.\n*   If the domain is correct, contact the partner to investigate potential issues with their DNS configuration or service availability.\n\n## Confidence & caveats\nHigh confidence, as the log explicitly states \"DNS lookup failed... NXDOMAIN,\" which is a clear and unambiguous error message from the DNS system. The retrieved incidents did not provide any directly relevant information, so the diagnosis is based solely on the log message.",
+      "extracted_root_cause": "The root cause is a DNS resolution failure for `api.partner.example.com`, indicated by the `NXDOMAIN` error. This means that the queried domain name does not exist, or the DNS server authoritative for `api.partner.example.com` is not responding or incorrectly configured to state the domain doesn't exist. This directly led to the outbound webhook delivery being aborted.",
+      "keyword_score": 0.667,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 8.107,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "react",
+      "stage_latency_s": {
+        "rca_react_agent": 8.107
+      },
+      "stage_tokens": {
+        "rca_react_agent": 4151
+      },
+      "prompt_tokens": 3323,
+      "output_tokens": 324,
+      "total_tokens": 4151,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "ood-rate-limit",
+      "expected_incident_id": null,
+      "final_markdown": "## Root cause\nThe root cause is a surge in inbound HTTP requests, likely triggered by a marketing email blast, which exceeded the configured rate limit of 1000 requests/min. This resulted in HTTP 429 \"Too Many Requests\" responses from the rate limiter.\n\n## Suggested actions\n*   Review and potentially adjust the rate limiter configuration to accommodate anticipated traffic spikes from marketing activities.\n*   Coordinate with the marketing team to get advance notice of large email blasts or promotional events, allowing for proactive adjustments to system capacity or rate limits.\n*   Implement a mechanism to automatically scale rate limits or application capacity in response to increased demand.\n*   Investigate the impact of the 429 responses on user experience and conversion rates during the email blast.\n\n## Confidence & caveats\nI am highly confident in this diagnosis based directly on the log entries provided. The retrieved incidents did not provide directly applicable parallels for this specific scenario of a rate limiter being hit by a marketing-driven traffic spike.",
+      "extracted_root_cause": "The root cause is a surge in inbound HTTP requests, likely triggered by a marketing email blast, which exceeded the configured rate limit of 1000 requests/min. This resulted in HTTP 429 \"Too Many Requests\" responses from the rate limiter.",
+      "keyword_score": 1.0,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 16.271,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "react",
+      "stage_latency_s": {
+        "rca_react_agent": 16.271
+      },
+      "stage_tokens": {
+        "rca_react_agent": 4034
+      },
+      "prompt_tokens": 3412,
+      "output_tokens": 266,
+      "total_tokens": 4034,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    },
+    {
+      "id": "ood-feature-flag",
+      "expected_incident_id": null,
+      "final_markdown": "## Root cause\nThe root cause is a `NullPointerException` occurring within the `FeatureFlagResolver.resolve` method, directly following the rollout of the 'new-checkout-flow' feature flag. This indicates that the new feature flag or the code path it enables is likely misconfigured or contains a bug that attempts to dereference a null object.\n\n## Suggested actions\n*   Immediately roll back the 'new-checkout-flow' feature flag.\n*   Review the code changes associated with the 'new-checkout-flow' feature flag for potential null dereferences in the `FeatureFlagResolver`.\n*   Inspect the configuration for the 'new-checkout-flow' feature flag to ensure all required values are present and correctly formatted.\n*   Add more robust null checks or default values in the `FeatureFlagResolver` to prevent similar `NullPointerException` issues.\n\n## Confidence & caveats\nI am highly confident in this diagnosis. The log clearly links the `NullPointerException` to the `FeatureFlagResolver` and specifies that a feature flag rollout happened just before the errors started. The retrieved incidents did not provide any relevant matches, suggesting this might be a new failure mode or one not previously documented in a similar fashion.",
+      "extracted_root_cause": "The root cause is a `NullPointerException` occurring within the `FeatureFlagResolver.resolve` method, directly following the rollout of the 'new-checkout-flow' feature flag. This indicates that the new feature flag or the code path it enables is likely misconfigured or contains a bug that attempts to dereference a null object.",
+      "keyword_score": 1.0,
+      "keyword_verdict": "exact",
+      "expected_incident_retrieved": null,
+      "top_retrieval_similarity": null,
+      "latency_s": 5.141,
+      "llm_judge_verdict": null,
+      "error": null,
+      "ablation": "react",
+      "stage_latency_s": {
+        "rca_react_agent": 5.141
+      },
+      "stage_tokens": {
+        "rca_react_agent": 2550
+      },
+      "prompt_tokens": 1971,
+      "output_tokens": 283,
+      "total_tokens": 2550,
+      "retrieved_ids": [],
+      "expected_incident_rank": null
+    }
+  ]
+}
