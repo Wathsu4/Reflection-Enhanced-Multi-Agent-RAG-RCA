@@ -191,6 +191,14 @@ class ScenarioResult:
     # the scenario is OOD).
     retrieved_ids: list[str] = field(default_factory=list)
     expected_incident_rank: int | None = None
+    # --- Tier 0 diagnostics (How-To-Improve/TIER0_PLAN.md Phase 0) ---
+    # Populated from `record_reflection`'s `_debug` payload once Phase 1's
+    # deterministic delta gate lands; stays `None` (inert) until then.
+    reflection_positive_dropped_count: int | None = None
+    reflection_negative_dropped_count: int | None = None
+    # Populated once Phase 4's multi-sample ensembling lands; stays `None`
+    # (inert) until then.
+    reflection_ensemble_agreement: float | None = None
 
 
 # -------------------- pipeline runner --------------------
