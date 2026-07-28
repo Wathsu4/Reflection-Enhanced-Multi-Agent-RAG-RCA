@@ -96,6 +96,22 @@ def test_seeder_loads_all_shipped_files(
     assert patched_memory.count() == expected
 
 
+def test_seeder_produces_neutral_success_score(
+    patched_memory: IncidentMemory,
+) -> None:
+    """Tier 0 Phase 2 check: `build_record()` doesn't set `alpha`/`beta`
+    explicitly, so every seeded record should derive
+    `success_score == 2*alpha/(alpha+beta) == 1.0` from the default
+    prior -- verify this rather than assume the dataclass defaults
+    still line up after the schema change."""
+    seeder.main([])
+    raw = patched_memory._collection.get(include=["metadatas"])  # noqa: SLF001
+    for meta in raw["metadatas"]:
+        assert meta["alpha"] == pytest.approx(2.0)
+        assert meta["beta"] == pytest.approx(2.0)
+        assert meta["success_score"] == pytest.approx(1.0)
+
+
 def test_seeder_is_idempotent(
     patched_memory: IncidentMemory, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -8,7 +8,12 @@ must be JSON-primitive only, `success_score` is clamped to [0, 2]) in
 one place.
 
 Phase 6 introduces this. Phases 7+ extend it with reflection-driven
-score updates.
+score updates. Tier 0 Phase 2 (How-To-Improve/TIER0_PLAN.md SS4) replaces
+the old "add delta, clamp" scheme with a confidence-weighted
+alpha/beta pseudo-count model, so the score gets *stickier* (more
+resistant to swings) as more evidence accumulates, instead of an
+unbounded random walk. This is a breaking change to the on-disk
+metadata schema -- run `just reset-demo` after upgrading.
 """
 
 from __future__ import annotations
@@ -23,6 +28,7 @@ from chromadb.api.types import EmbeddingFunction
 from chromadb.config import Settings as ChromaSettings
 
 from rca_system.settings import settings
+from rca_system.tools.record_reflection import _DELTA_MAX, _DELTA_MIN
 
 
 @dataclass
@@ -41,10 +47,26 @@ class IncidentRecord:
     root_cause: str
     resolution: str
     tags: str  # comma-separated; e.g. "redis,network,connection"
-    success_score: float = 1.0
+    # `success_score` is left `None` to mean "derive it from alpha/beta"
+    # (the normal case for a freshly-constructed record); pass it
+    # explicitly to pin an exact value regardless of the prior (existing
+    # tests that only care about ranking behavior rely on this). Once
+    # `update_score` runs, alpha/beta -- not this field's initial value --
+    # become the source of truth for every future recomputation.
+    success_score: float | None = None
     usage_count: int = 0
     last_used_ts: float = 0.0
     added_ts: float = 0.0
+    # Beta-distribution-style pseudo-count prior (Tier 0 Phase 2). Higher
+    # values make the derived success_score more resistant to early
+    # swings. Defaults come from settings so a fresh record always starts
+    # neutral: 2*alpha/(alpha+beta) == 1.0 when alpha == beta.
+    alpha: float = field(default_factory=lambda: settings.score_prior_strength)
+    beta: float = field(default_factory=lambda: settings.score_prior_strength)
+
+    def __post_init__(self) -> None:
+        if self.success_score is None:
+            self.success_score = 2 * self.alpha / (self.alpha + self.beta)
 
     def to_document(self) -> str:
         """Natural-language form of this incident, used as the embedding
@@ -134,11 +156,21 @@ class IncidentMemory:
         )
 
     def update_score(self, incident_id: str, delta: float) -> None:
-        """Adjust `success_score` by `delta`, clamped to [0.0, 2.0].
+        """Nudge `success_score` toward `delta`'s sign via a confidence-
+        weighted pseudo-count update (Tier 0 Phase 2).
 
-        The reflection agent (Phase 7) calls this after judging whether
-        a retrieved incident actually helped solve the new one. Boosts
-        on success, penalises on irrelevance.
+        The reflection agent calls this after judging whether a retrieved
+        incident actually helped solve the new one. Unlike a plain
+        "add delta, clamp" scheme, each call's effect shrinks as more
+        evidence accumulates on an incident -- one run can't swing a
+        well-established score straight to an extreme, but the score
+        still asymptotically approaches 0.0/2.0 under sustained one-sided
+        pressure (see `IncidentRecord.alpha`/`beta`).
+
+        `delta` is re-clamped to `[_DELTA_MIN, _DELTA_MAX]` here too, as
+        defense-in-depth independent of `record_reflection`'s own clamp
+        (same bound constants, imported -- not duplicated -- so they
+        can't drift out of sync).
         """
         res = self._collection.get(
             ids=[incident_id], include=["metadatas"]
@@ -146,10 +178,22 @@ class IncidentMemory:
         if not res["ids"]:
             return
         meta = dict(res["metadatas"][0])
-        new_score = max(
-            0.0, min(2.0, float(meta.get("success_score", 1.0)) + delta)
+
+        clamped_delta = max(_DELTA_MIN, min(_DELTA_MAX, float(delta)))
+        pseudocount = min(
+            1.0, abs(clamped_delta) / settings.delta_to_pseudocount_scale
         )
-        meta["success_score"] = new_score
+
+        alpha = float(meta.get("alpha", settings.score_prior_strength))
+        beta = float(meta.get("beta", settings.score_prior_strength))
+        if clamped_delta > 0:
+            alpha += pseudocount
+        elif clamped_delta < 0:
+            beta += pseudocount
+
+        meta["alpha"] = alpha
+        meta["beta"] = beta
+        meta["success_score"] = 2 * alpha / (alpha + beta)
         self._collection.update(ids=[incident_id], metadatas=[meta])
 
     def mark_retrieved(self, incident_ids: list[str]) -> None:

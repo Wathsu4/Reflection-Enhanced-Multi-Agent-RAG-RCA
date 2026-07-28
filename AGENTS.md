@@ -502,3 +502,42 @@ context. Don't overwrite — append.
 context: ...
 note: ...
 -->
+
+### 2026-07-28 — google-adk `additional_properties` schema bug with `Optional[list[str]]` params
+context: implementing Tier 0 Phase 1 (`How-To-Improve/TIER0_PLAN.md`), adding
+`used_incident_ids`/`retrieved_incident_ids: list[str] | None = None` params to
+`record_reflection` broke the live pipeline outright.
+note: `google-adk==1.32.0` (this repo's pinned version) has a bug — matches
+[google/adk-python#5364](https://github.com/google/adk-python/issues/5364) —
+where ANY function parameter whose default value fails ADK's
+`isinstance(default, annotation)` compatibility check (true for `None` against
+`list[str]`, regardless of `Optional[...]` vs `X | None` spelling — Python 3.14
+unifies both under `types.UnionType`) forces the tool's *entire* parameter
+schema through a `pydantic.TypeAdapter(...).json_schema()` fallback that emits
+a snake_case `additional_properties` key instead of `additionalProperties`.
+`gemini-2.5-flash` 400s on the unrecognized field ("Unknown name
+\"additional_properties\" ... Cannot find field"); `gemini-*-pro` tolerates it
+silently, so this is easy to miss if you only smoke-test against pro. The
+fallback also corrupts sibling parameters in the same schema (e.g. an
+already-working `dict[str, float]` param). If you need an ADK function tool
+with an `Optional[...]`/nullable list or dict parameter on this stack: don't
+use a plain `FunctionTool(func=...)`. Subclass it and override
+`_get_declaration()` with a hand-built schema instead (see
+`_RecordReflectionTool` in `rca_system/agents/reflection_agent.py`) — the real
+Python function keeps its natural signature for direct callers/tests; only the
+Gemini-facing schema needs the workaround.
+
+### 2026-07-28 — Tier 0 Phase 2 changed the ChromaDB incident metadata schema
+context: `IncidentRecord` gained `alpha`/`beta` pseudo-count fields
+(`rca_system/memory/chroma_store.py`); `success_score` is now derived from
+them (`2*alpha/(alpha+beta)`) every time `IncidentMemory.update_score` runs.
+note: this is a **breaking change** to on-disk ChromaDB state. Records seeded
+before this change have no `alpha`/`beta` metadata; `update_score` falls back
+to `settings.score_prior_strength` for missing fields so it won't crash, but
+the resulting score can look inconsistent with a pre-existing `success_score`
+that was never derived from those defaults. Run `just reset-demo` (or
+`uv run python scripts/reset_memory.py`) once after pulling this change —
+already the documented, safe, idempotent way to get back to known-good state,
+no new tooling needed. Not backfilled on purpose (rejected in
+`TIER0_PLAN.md` SS3 as unwarranted complexity for a research prototype's fully
+regenerable vector index).

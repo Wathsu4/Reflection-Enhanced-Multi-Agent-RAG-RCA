@@ -378,64 +378,119 @@ all on this stack, not scope creep; noting it here per the plan's own "write dow
 unbounded random walk, independent of Phase 1's acute fix.
 
 **Changes:**
-- [ ] `rca_system/memory/chroma_store.py`: add `alpha`/`beta` fields to `IncidentRecord`
+- [x] `rca_system/memory/chroma_store.py`: add `alpha`/`beta` fields to `IncidentRecord`
       (defaults from `settings.score_prior_strength`). Rewrite `update_score` per the §4 formula.
       Keep the public signature `update_score(incident_id, delta)` unchanged — callers
       (`update_memory.py`) need no changes.
-- [ ] `rca_system/tools/update_memory.py`: no logic changes expected (it already just calls
+- [x] `rca_system/tools/update_memory.py`: no logic changes expected (it already just calls
       `memory.update_score` and re-reads `success_score` before/after) — verify this is actually
-      true once Phase 2 lands, don't assume it.
-- [ ] Update `README.md` / `AGENTS.md` (§4 env var table, §6 tool description) and
+      true once Phase 2 lands, don't assume it. — Confirmed via `git diff --stat`: zero changes.
+- [x] Update `README.md` / `AGENTS.md` (§4 env var table, §6 tool description) and
       `docs/DEMO.md` to note the schema change and the required `just reset-demo` after
-      upgrading.
+      upgrading. — Scoped narrowly for this phase (the comprehensive §4/§6 rewrite covering all
+      5 settings + the gating/pseudo-count nuance is Phase 6's job, so those tables still read
+      "old" until then, on purpose): added a dated Living Notes entry to `AGENTS.md` §13
+      documenting the breaking schema change and the no-backfill decision, and changed
+      `docs/DEMO.md`'s one-time-setup step from a plain re-seed to `scripts/reset_memory.py` with
+      an inline note about why a full reset (not just a re-seed) is required after this change.
 
 **Tests — this phase *requires* rewriting, not just re-running:**
-- [ ] `tests/test_update_memory.py::test_returns_old_new_delta_per_id` and
+- [x] `tests/test_update_memory.py::test_returns_old_new_delta_per_id` and
       `test_persists_new_score_to_memory`: recompute expected values from the new formula (not
       simple addition) — show your arithmetic in a test comment so a reviewer can check it by
       hand.
-- [ ] `tests/test_update_memory.py::test_repeated_positive_deltas_clamp_at_2` /
+- [x] `tests/test_update_memory.py::test_repeated_positive_deltas_clamp_at_2` /
       `test_repeated_negative_deltas_clamp_at_0`: these currently expect saturation in 2–3 calls
       at the old linear-add rate; recompute how many calls it now takes under the pseudo-count
       model and update the loop count and expected value accordingly. Do not just increase the
       loop count until the old assertion happens to pass again without understanding why —
-      derive the expected `alpha`/`beta`/`success_score` explicitly.
-- [ ] `tests/test_chroma_store.py::test_update_score_clamps_to_range`: this test currently
+      derive the expected `alpha`/`beta`/`success_score` explicitly. — Renamed to
+      `test_repeated_positive_deltas_approach_but_never_reach_2` /
+      `..._negative_..._never_reach_0`; 100 repeated max-magnitude calls from a fresh prior derive
+      to exactly `51/26 ≈ 1.9615` / `1/26 ≈ 0.0385` respectively (shown in the test docstring).
+- [x] `tests/test_chroma_store.py::test_update_score_clamps_to_range`: this test currently
       expects **one call** with `delta=10.0` to saturate at `2.0`. Under Phase 2 this is no
       longer true by design (re-clamped to `0.2` → `1.0` pseudo-count → from the default prior
       `alpha=2,beta=2`, one call yields `alpha=3,beta=2` → `success_score=1.2`, *not* `2.0`).
       Rewrite this test to assert (a) a single extreme call moves the score by a bounded amount
       matching the formula, and (b) **repeated** extreme calls eventually saturate at the bound —
       add a new test for each. Do not delete the "eventually saturates" guarantee, it's load
-      bearing for the "runaway reputation" defense described in `docs/DEFENSE_GUIDE.md`.
-- [ ] New test: an incident seeded fresh (`alpha=beta=score_prior_strength`) has
-      `success_score == 1.0` exactly — pins the "prior is neutral" invariant.
-- [ ] New test: `test_seed_knowledge_base.py` and `test_reset_memory.py` still produce
+      bearing for the "runaway reputation" defense described in `docs/DEFENSE_GUIDE.md`. — Split
+      into `test_update_score_single_extreme_call_moves_by_bounded_amount` and
+      `test_update_score_repeated_extreme_calls_eventually_saturate` (N=50, asserts monotonic
+      non-decrease/non-increase at every step plus the exact final value, never overshooting).
+- [x] New test: an incident seeded fresh (`alpha=beta=score_prior_strength`) has
+      `success_score == 1.0` exactly — pins the "prior is neutral" invariant. —
+      `test_update_score_seeded_fresh_is_exactly_neutral`.
+- [x] New test: `test_seed_knowledge_base.py` and `test_reset_memory.py` still produce
       `success_score == 1.0` for every seeded record (should pass unchanged since
       `build_record()` doesn't set `alpha`/`beta` explicitly and the dataclass defaults handle
-      it — verify this rather than assuming it).
+      it — verify this rather than assuming it). — Added
+      `test_seeder_produces_neutral_success_score`; `test_reset_memory.py`'s existing post-reset
+      loop already asserted this and needed no change (only the *pre*-reset mutation's expected
+      value needed recomputing, see the deviation note below).
+- Plus two adversarial cases found during the critique loop, not in the original list:
+  `test_mark_retrieved_does_not_touch_alpha_beta` (independence check) and
+  `test_update_score_handles_pre_phase2_metadata_missing_alpha_beta` (the actual no-backfill
+  migration scenario: a record whose stored metadata has no `alpha`/`beta` at all).
 
-**Checkpoint (live Gemini):**
-- [ ] Run `evaluate_memory_evolution.py --runs 3` (bumped from 2, to see a longer trend) on the
-      existing dataset. Compare against Phase 0/Phase 1 baselines: scores should move by visibly
-      smaller increments per run and should not hit the `0.0`/`2.0` clamp within 3 runs unless an
-      incident is being *very* consistently flagged as misleading. Record the per-incident table
-      in the PR description.
+**Deviation (found during implementation, not in the original plan):**
+`tests/test_reset_memory.py::test_reset_removes_existing_dir_and_reseeds` also broke — it wasn't
+in the plan's explicit list (only `test_update_memory.py`/`test_chroma_store.py` were called out)
+but it primes a score via `mem.update_score(boosted_id, 0.5)` and asserted the old linear-add
+result (`1.5`). Recomputed: `delta=0.5` is re-clamped to `0.2`, giving pseudocount `1.0` ->
+`alpha=3.0, beta=2.0` -> `1.2`. Fixed with the same derive-don't-guess approach as the plan's
+other test rewrites.
+
+**Checkpoint (live Gemini) — results recorded 2026-07-28:**
+- [x] Ran `evaluate_memory_evolution.py --runs 3` on the existing dataset (fresh reset first).
+      Full per-incident table (`eval/memory-evolution-20260728-073009.md`):
+
+      | incident_id | baseline | after run 1 | after run 2 | after run 3 |
+      |---|---|---|---|---|
+      | `db-deadlock-001` | 1.000 | 1.333 | 1.500 | 1.524 |
+      | `disk-full-log-001` | 1.000 | 1.231 | 1.375 | 1.500 |
+      | `jvm-oom-heap-001` | 1.000 | 1.304 | 1.484 | 1.442 |
+      | `redis-conn-refused-001` | 1.000 | 1.304 | 1.273 | 1.333 |
+      | `tls-cert-expired-001` | 1.000 | 1.333 | 1.412 | 1.429 |
+      | `upstream-timeout-payments-001` | 1.000 | 1.304 | 1.375 | 1.364 |
+
+      **Drift summary:** 6/6 incidents boosted, 0 demoted, 0 unchanged — a complete reversal of
+      the Phase 0 baseline (5/6 demoted, one at the `0.0` floor). Per-run increments visibly
+      shrink (e.g. `db-deadlock-001`: +0.333 → +0.167 → +0.024), consistent with the
+      confidence-weighting design intent, and **no incident hit the `0.0`/`2.0` clamp** across 3
+      runs. Combined with Phase 1's gate (which is why every incident trends *up* now instead of
+      down — genuinely-cited incidents get clean positive credit and stray negatives are capped),
+      this is a strong joint result. Not yet a full generalization test (still the 6-incident KB;
+      that's Phase 5).
 
 **Critique checklist:**
-- [ ] Confirm the re-clamp inside `update_score` uses the **same** bound constant as
+- [x] Confirm the re-clamp inside `update_score` uses the **same** bound constant as
       `record_reflection`'s `_DELTA_MIN`/`_DELTA_MAX` (import/share it — do not duplicate the
-      literal `0.2` in two files where it can silently drift out of sync).
-- [ ] Confirm `retrieve_incidents.py` was **not** touched in this phase (it should keep reading
+      literal `0.2` in two files where it can silently drift out of sync). — Imported directly
+      (`from rca_system.tools.record_reflection import _DELTA_MAX, _DELTA_MIN`); no duplicated
+      literal.
+- [x] Confirm `retrieve_incidents.py` was **not** touched in this phase (it should keep reading
       `metadata["success_score"]` unchanged — if you found yourself editing it, that's a sign
-      the derived-field caching isn't working and needs to be fixed here, not deferred).
-- [ ] Check the migration story is actually documented somewhere a future reader will see it
+      the derived-field caching isn't working and needs to be fixed here, not deferred). —
+      `git diff --stat` confirms zero changes.
+- [x] Check the migration story is actually documented somewhere a future reader will see it
       (`AGENTS.md` env var table is the most likely place someone checks) — not just mentioned in
-      a commit message.
-- [ ] Does `mark_retrieved`'s `usage_count` interact with the new `alpha`/`beta` bookkeeping in
+      a commit message. — Added to `AGENTS.md` §13 Living Notes (dated) plus `docs/DEMO.md`'s
+      setup step; the full §4 table gets the 5-settings sweep in Phase 6 as planned.
+- [x] Does `mark_retrieved`'s `usage_count` interact with the new `alpha`/`beta` bookkeeping in
       any surprising way (e.g. double-counting)? They should remain fully independent counters —
       write a test that bumps `usage_count` via retrieval without touching `alpha`/`beta`, and
-      vice versa.
+      vice versa. — `test_mark_retrieved_does_not_touch_alpha_beta`: confirmed fully independent
+      in both directions.
+- Full suite: 150 passed, 0 failed. `ruff check .` unchanged from baseline (2 pre-existing,
+  unrelated unused-import warnings, down from 3 -- Phase 2's `alpha`/`beta` fields incidentally
+  started using the previously-unused `dataclasses.field` import). `pyright` shows 2 more
+  instances of an already-pre-existing warning category (`meta.get(...)` results typed to include
+  chromadb's `SparseVector`/`MetadataListValue`, which pyright can't statically exclude from
+  `float()`/`int()` — the *same* pattern already present in `mark_retrieved` on `main`, just now
+  also present for `alpha`/`beta` alongside the pre-existing `success_score`/`usage_count`
+  instances); not a new category of type-safety issue, not fixed here (out of scope).
 
 ---
 

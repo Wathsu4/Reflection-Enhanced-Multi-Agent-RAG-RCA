@@ -63,6 +63,9 @@ def test_reset_removes_existing_dir_and_reseeds(
         embedding_function=FakeEmbeddingFunction(),
     )
     boosted_id = "redis-conn-refused-001"
+    # Tier 0 Phase 2: delta=0.5 is re-clamped to 0.2 (max), giving a 1.0
+    # pseudocount -> from the fresh seed prior (alpha=beta=2.0):
+    # alpha=3.0, beta=2.0 -> success_score = 2*3/(3+2) = 1.2 (not 1.5).
     mem.update_score(boosted_id, 0.5)
     pre_reset = mem.query("anything", k=10)
     pre_score = next(
@@ -70,7 +73,7 @@ def test_reset_removes_existing_dir_and_reseeds(
         for h in pre_reset
         if h["incident_id"] == boosted_id
     )
-    assert pre_score == pytest.approx(1.5)
+    assert pre_score == pytest.approx(1.2)
     del mem  # close any in-process handles before rmtree
 
     # Act: reset
