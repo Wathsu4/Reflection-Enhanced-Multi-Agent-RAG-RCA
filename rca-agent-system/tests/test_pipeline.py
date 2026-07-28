@@ -127,6 +127,53 @@ def test_reflection_agent_has_record_reflection_tool() -> None:
     assert "record_reflection" in tool_names
 
 
+def _schema_has_forbidden_keys(schema: object) -> bool:
+    """Recursively check a `google.genai.types.Schema` (or nested dict/
+    list within one) for the two shapes that break gemini-2.5-flash
+    function calling: a snake_case `additional_properties` key, or an
+    `any_of` union (see google/adk-python#5364)."""
+    if schema is None:
+        return False
+    dumped = (
+        schema.model_dump(exclude_none=True)
+        if hasattr(schema, "model_dump")
+        else schema
+    )
+    if isinstance(dumped, dict):
+        if "additional_properties" in dumped or "any_of" in dumped:
+            return True
+        return any(_schema_has_forbidden_keys(v) for v in dumped.values())
+    if isinstance(dumped, list):
+        return any(_schema_has_forbidden_keys(v) for v in dumped)
+    return False
+
+
+def test_record_reflection_tool_schema_has_no_additional_properties_or_any_of() -> None:
+    """Regression pin for the google-adk `additional_properties` /
+    `Optional[list[str]]` schema bug (google/adk-python#5364): the
+    reflection agent's `record_reflection` tool declares
+    `used_incident_ids`/`retrieved_incident_ids` as `list[str] | None`,
+    which trips ADK's buggy pydantic.TypeAdapter fallback and 400s on
+    gemini-2.5-flash. `_RecordReflectionTool` hand-builds the schema to
+    avoid it -- this test fails loudly if that override ever regresses
+    (e.g. reverted back to a plain `FunctionTool`)."""
+    tool = next(
+        t for t in reflection_agent.tools if _tool_name(t) == "record_reflection"
+    )
+    decl = tool._get_declaration()  # noqa: SLF001 -- intentional internal check
+    assert decl is not None
+    assert not _schema_has_forbidden_keys(decl.parameters)
+    # And the params record_reflection's gating logic needs are present.
+    assert decl.parameters is not None
+    assert set(decl.parameters.properties or {}) >= {
+        "incident_score_deltas",
+        "overall_quality",
+        "rationale",
+        "used_incident_ids",
+        "retrieved_incident_ids",
+    }
+
+
 def test_memory_update_agent_has_apply_reflection_tool() -> None:
     tool_names = {_tool_name(t) for t in memory_update_agent.tools}
     assert "apply_reflection_to_memory" in tool_names

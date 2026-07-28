@@ -266,66 +266,109 @@ against).
 question a code-enforced gate instead of a prompt-compliance hope.
 
 **Changes:**
-- [ ] `rca_system/tools/record_reflection.py`: extend `record_reflection` signature to
+- [x] `rca_system/tools/record_reflection.py`: extend `record_reflection` signature to
       `(incident_score_deltas, overall_quality, rationale, used_incident_ids=None,
       retrieved_incident_ids=None)`. Implement the exact gating rule from §4. Keep both new
       params optional with safe defaults (`None` → treat as "gate nothing" / "cap nothing") so
       **direct unit tests of the old 3-arg call shape don't all need to change at once** — but
       note in the docstring that the pipeline always supplies both from here on.
-- [ ] `rca_system/agents/reflection_agent.py`: update the instruction to (a) explain the new
+- [x] `rca_system/agents/reflection_agent.py`: update the instruction to (a) explain the new
       tool params and instruct the agent to pass `used_incident_ids` from
       `{reasoning_output?}` and `retrieved_incident_ids` from the ids present in
       `{retrieval_output?}`, and (b) strengthen the neutral-scoring language (explicit "if in
       doubt, omit it" framing, and require the `rationale` to name any incident it assigns a
       negative delta to).
-- [ ] `scripts/evaluate.py`: populate the two new diagnostic counters added in Phase 0 from the
+- [x] `scripts/evaluate.py`: populate the two new diagnostic counters added in Phase 0 from the
       gate's before/after counts (requires `record_reflection`, or a thin wrapper around it, to
       report what it dropped — return an extra `_debug` key is acceptable here since it's
       evaluation-only consumption; the production pipeline ignores it).
 
+**Deviation (found and fixed, not in the original plan):** the naive `FunctionTool(func=record_reflection)`
+registration broke the *live* pipeline outright — `google-adk==1.32.0` on Python 3.14 has a bug
+(matches [google/adk-python#5364](https://github.com/google/adk-python/issues/5364)) where any
+`Optional[list[str]]`/`list[str] | None` parameter forces the tool's *entire* schema through a
+`pydantic.TypeAdapter(...).json_schema()` fallback that emits a snake_case `additional_properties`
+key instead of the API's `additionalProperties`. `gemini-2.5-flash` 400s on the unrecognized field
+("Unknown name \"additional_properties\" ... Cannot find field") — confirmed via a `--limit 3`
+smoke run that failed 3/3 with that exact `ClientError` once `used_incident_ids`/
+`retrieved_incident_ids` were added. The fallback is contagious: it also corrupted the
+already-shipping `incident_score_deltas: dict[str, float]` parameter's schema, which had been
+fine for months. Root-caused offline (no API calls) by diffing `FunctionTool()._get_declaration()`
+output across signature variants — confirmed the trigger is specifically a default value that
+fails ADK's `isinstance(default, annotation)` compatibility check (`None` is never an instance of
+`list`), which is true for `Optional[...]`/`X | None` regardless of `typing.Optional` vs PEP 604
+spelling (Python 3.14 unifies both under `types.UnionType`, so there is no "cleaner" spelling that
+dodges it on this Python version). Fix: added `_RecordReflectionTool(FunctionTool)` in
+`reflection_agent.py`, overriding `_get_declaration()` with a hand-built, bug-free schema
+(`used_incident_ids`/`retrieved_incident_ids` as plain required `ARRAY` of `STRING`, matching what
+the updated instruction already guarantees Gemini will supply); `record_reflection`'s real Python
+signature — and thus every test above and the back-compat contract — is untouched. Added
+`test_record_reflection_tool_schema_has_no_additional_properties_or_any_of` in
+`tests/test_pipeline.py` as a regression pin. This is a required fix to make Phase 1 function at
+all on this stack, not scope creep; noting it here per the plan's own "write down why" rule.
+
 **Tests (`tests/test_record_reflection.py`):**
-- [ ] Positive delta for an id **not** in `used_incident_ids` → dropped.
-- [ ] Positive delta for an id **in** `used_incident_ids` → kept, value unchanged (post-clamp).
-- [ ] Negative deltas within the cap (`≤ ceil(N_retrieved * 0.4)`) → all kept.
-- [ ] Negative deltas exceeding the cap → only the largest-magnitude ones up to the cap survive;
+- [x] Positive delta for an id **not** in `used_incident_ids` → dropped.
+- [x] Positive delta for an id **in** `used_incident_ids` → kept, value unchanged (post-clamp).
+- [x] Negative deltas within the cap (`≤ ceil(N_retrieved * 0.4)`) → all kept.
+- [x] Negative deltas exceeding the cap → only the largest-magnitude ones up to the cap survive;
       verify which ones are dropped, not just the count.
-- [ ] A delta of exactly `0.0` → dropped regardless of `used_incident_ids`.
-- [ ] `used_incident_ids=None` / `retrieved_incident_ids=None` (back-compat call shape) →
+- [x] A delta of exactly `0.0` → dropped regardless of `used_incident_ids`.
+- [x] `used_incident_ids=None` / `retrieved_incident_ids=None` (back-compat call shape) →
       behaves exactly like the pre-Phase-1 tool (no gating applied) — this is the explicit
       backward-compatibility contract, write a test that pins it.
-- [ ] Existing tests (`test_clamps_deltas_to_plus_minus_zero_point_two`,
+- [x] Existing tests (`test_clamps_deltas_to_plus_minus_zero_point_two`,
       `test_skips_non_numeric_delta_values`, `test_accepts_list_of_objects_format`, etc.) must
       still pass — update their call sites to pass explicit `used_incident_ids`/
       `retrieved_incident_ids` only where the test's intent requires it; otherwise leave them
-      relying on the `None` back-compat path.
+      relying on the `None` back-compat path. (None needed changes — all pass unmodified via the
+      back-compat path.)
+- Plus two adversarial cases found during the critique loop, not in the original list:
+  `test_positive_gate_disabled_but_retrieved_universe_filter_still_applies` (the two gates are
+  independent, not paired) and the ADK schema regression test noted above.
 
-**Checkpoint (live Gemini, small):**
-- [ ] Run `uv run python scripts/evaluate.py --ablation none --limit 3` and manually read the raw
-      per-scenario `reflection_output` in the JSON — confirm Gemini is actually supplying
-      non-empty `used_incident_ids`/being consistent enough for the gate to do meaningful work
-      (if the model frequently leaves `used_incident_ids` empty even when it clearly used
-      something, the reasoning-agent's prompt may need the same "always populate this" emphasis
-      — flag this, don't silently patch reasoning_agent.py without noting it in the PR).
-- [ ] Run `scripts/evaluate.py --ablation none` and `--ablation memory_frozen` on the *existing*
-      15-scenario/6-incident dataset (full run, not `--limit`). Compare MRR/nDCG/keyword-accuracy
-      against the Phase 0 baseline. Expect the `none` vs `memory_frozen` gap to shrink materially
-      relative to Phase 0. Record the numbers in this file's checklist (below) before continuing.
+**Checkpoint (live Gemini, small) — results recorded 2026-07-28:**
+- [x] Ran `uv run python scripts/evaluate.py --ablation none --limit 3` and read the raw
+      `record_reflection` tool call/response pairs from `raw_events` in the JSON. Confirmed Gemini
+      reliably supplies non-empty, accurate `used_incident_ids` (e.g. scenario `redis-2`: reasoning
+      cited only `redis-conn-refused-001`, reflection proposed one matching positive delta plus
+      *four* negative deltas for every other retrieved incident — the exact Matthew-effect pattern
+      from §1 — and the gate correctly kept the 2 highest-magnitude negatives (`disk-full-log-001`,
+      `upstream-timeout-payments-001`) and dropped the other 2
+      (`tls-cert-expired-001`, `db-deadlock-001`), matching `_debug: {positive_dropped_count: 0,
+      negative_dropped_count: 2}`). No prompt-compliance concern found; reasoning_agent's
+      `used_incident_ids` emission is already reliable enough for the gate to do real work.
+- [x] Ran the full 15-scenario dataset for both variants (fresh reset before each):
+      **`none`**: keyword acc (E+P) **1.0** (11 exact/4 partial/0 miss), retrieval **MRR 1.0**,
+      **nDCG@5 1.0**, mean latency 24.04s (`eval/results-20260728-065329.{json,md}`).
+      **`memory_frozen`**: keyword acc (E+P) **1.0** (11 exact/4 partial/0 miss), retrieval
+      **MRR 1.0**, **nDCG@5 1.0**, mean latency 25.22s
+      (`eval/experiments/results-memory_frozen-20260728-065957.{json,md}`).
+      **Gap vs Phase 0:** MRR gap closed from **0.208 → 0.0**, nDCG@5 gap closed from
+      **0.156 → 0.0** — the two variants are now indistinguishable on this metric on the current
+      6-incident KB. (Phase 5's expanded KB is the real stress test for whether this holds once
+      k=5 no longer covers ~83% of the catalog; flagging here that Phase 1 alone already closes
+      the gap at the *current* KB size, which is a strong but not yet fully generalized result.)
 
 **Critique checklist:**
-- [ ] Does the gate correctly handle `retrieved_incident_ids` being **shorter** than
+- [x] Does the gate correctly handle `retrieved_incident_ids` being **shorter** than
       `incident_score_deltas` (reflection hallucinated an id that wasn't even retrieved)? Decide
       and test explicitly: such an id should be dropped (it can't be verified against either
-      list meaningfully) — write the test.
-- [ ] Does the fraction-based negative cap round sensibly at small N (e.g. `N_retrieved=1`:
+      list meaningfully) — write the test. — `test_id_not_in_retrieved_incident_ids_is_dropped`.
+- [x] Does the fraction-based negative cap round sensibly at small N (e.g. `N_retrieved=1`:
       `ceil(1*0.4)=1`, so a single retrieved-and-irrelevant incident can still be penalized —
       confirm this is the intended behavior, not an off-by-one that zeroes out all negative
-      signal when only 1–2 incidents are retrieved).
-- [ ] Confirm `apply_reflection_to_memory` and `IncidentMemory.update_score` were **not**
+      signal when only 1–2 incidents are retrieved). — `test_negative_cap_rounds_up_for_small_retrieved_sets`
+      confirms 1 negative delta survives at N=1; matches design intent.
+- [x] Confirm `apply_reflection_to_memory` and `IncidentMemory.update_score` were **not**
       touched in this phase — Phase 1 only changes what makes it into the dict, not how the dict
-      is applied. If you find yourself editing `update_memory.py`, stop — that's Phase 2's job.
-- [ ] Re-run the full `rca-agent-system` test suite, not just `test_record_reflection.py` —
+      is applied. If you find yourself editing `update_memory.py`, stop — that's Phase 2's job. —
+      `git diff --stat` confirms zero changes to either file.
+- [x] Re-run the full `rca-agent-system` test suite, not just `test_record_reflection.py` —
       `test_pipeline.py` and `test_agent_loads.py` touch the reflection agent's instruction
-      string; confirm nothing asserts on the old instruction text verbatim.
+      string; confirm nothing asserts on the old instruction text verbatim. — Full suite green
+      (145 passed); grepped tests/ for old instruction substrings ("skeptical senior engineer",
+      "hand-waving", "neutral evidence") — no verbatim-text assertions found anywhere.
 
 ---
 

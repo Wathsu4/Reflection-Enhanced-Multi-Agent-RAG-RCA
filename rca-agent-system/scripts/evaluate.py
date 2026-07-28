@@ -207,6 +207,38 @@ class ScenarioResult:
 # Gemini key).
 
 
+def _apply_reflection_diagnostics(result: ScenarioResult, event: Any) -> None:
+    """Populate the Tier 0 delta-gate diagnostics on `result` from a
+    single ADK event, if it carries a `record_reflection` tool response.
+
+    Reads the tool's own `_debug` payload directly off the function
+    response (not the LLM's echoed text) -- the reflection agent's
+    instruction only re-emits 4 of the tool's 5 return keys, so `_debug`
+    never reaches `reflection_output` session state. Best-effort:
+    swallows malformed events rather than failing the eval over optional
+    diagnostics.
+    """
+    try:
+        get_function_responses = event.get_function_responses
+    except AttributeError:
+        return
+    try:
+        for fr in get_function_responses():
+            if getattr(fr, "name", None) != "record_reflection":
+                continue
+            debug = (getattr(fr, "response", None) or {}).get("_debug") or {}
+            if "positive_dropped_count" in debug:
+                result.reflection_positive_dropped_count = int(
+                    debug["positive_dropped_count"]
+                )
+            if "negative_dropped_count" in debug:
+                result.reflection_negative_dropped_count = int(
+                    debug["negative_dropped_count"]
+                )
+    except Exception:
+        pass
+
+
 def _apply_retrieval_signals(
     result: ScenarioResult, scenario: Scenario, retrieval_payload: Any
 ) -> None:
@@ -391,6 +423,8 @@ async def _run_pipeline_for_scenario(
                     final_output = v
             if "retrieval_output" in state_delta:
                 retrieval_payload = state_delta["retrieval_output"]
+
+            _apply_reflection_diagnostics(result, event)
     except Exception as exc:
         result.error = f"{type(exc).__name__}: {exc}"
     finally:

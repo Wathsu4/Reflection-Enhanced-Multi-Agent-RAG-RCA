@@ -109,3 +109,164 @@ def test_rationale_is_stripped_string() -> None:
 def test_none_rationale_becomes_empty_string() -> None:
     out = record_reflection({}, "high", None)  # type: ignore[arg-type]
     assert out["rationale"] == ""
+
+
+# ---------- Phase 1: deterministic delta gating ----------
+# (How-To-Improve/TIER0_PLAN.md SS4 / SS6)
+
+
+def test_positive_delta_dropped_if_not_in_used_incident_ids() -> None:
+    out = record_reflection(
+        {"a": 0.15},
+        "medium",
+        "r",
+        used_incident_ids=[],
+        retrieved_incident_ids=["a"],
+    )
+    assert "a" not in out["incident_score_deltas"]
+    assert out["_debug"]["positive_dropped_count"] == 1
+    assert out["_debug"]["negative_dropped_count"] == 0
+
+
+def test_positive_delta_kept_if_in_used_incident_ids() -> None:
+    out = record_reflection(
+        {"a": 0.15},
+        "medium",
+        "r",
+        used_incident_ids=["a"],
+        retrieved_incident_ids=["a"],
+    )
+    assert out["incident_score_deltas"] == {"a": 0.15}
+    assert out["_debug"]["positive_dropped_count"] == 0
+
+
+def test_negative_deltas_within_cap_are_all_kept() -> None:
+    """N_retrieved=5 -> cap = ceil(5*0.4) = 2. Two proposed negatives both
+    fit under the cap."""
+    out = record_reflection(
+        {"a": -0.1, "b": -0.15},
+        "low",
+        "r",
+        used_incident_ids=[],
+        retrieved_incident_ids=["a", "b", "c", "d", "e"],
+    )
+    assert out["incident_score_deltas"] == {"a": -0.1, "b": -0.15}
+    assert out["_debug"]["negative_dropped_count"] == 0
+
+
+def test_negative_deltas_exceeding_cap_keep_largest_magnitude() -> None:
+    """N_retrieved=5 -> cap = 2. Three negatives proposed; the smallest-
+    magnitude one ("c", -0.05) must be the one dropped, not an arbitrary
+    one."""
+    out = record_reflection(
+        {"a": -0.2, "b": -0.1, "c": -0.05},
+        "low",
+        "r",
+        used_incident_ids=[],
+        retrieved_incident_ids=["a", "b", "c", "d", "e"],
+    )
+    assert out["incident_score_deltas"] == {"a": -0.2, "b": -0.1}
+    assert "c" not in out["incident_score_deltas"]
+    assert out["_debug"]["negative_dropped_count"] == 1
+
+
+def test_negative_cap_rounds_up_for_small_retrieved_sets() -> None:
+    """N_retrieved=1 -> ceil(1*0.4)=1: a single retrieved-and-irrelevant
+    incident can still be penalized. This is intended -- the cap must not
+    zero out all negative signal when only 1-2 incidents were retrieved."""
+    out = record_reflection(
+        {"only": -0.1},
+        "low",
+        "r",
+        used_incident_ids=[],
+        retrieved_incident_ids=["only"],
+    )
+    assert out["incident_score_deltas"] == {"only": -0.1}
+    assert out["_debug"]["negative_dropped_count"] == 0
+
+
+def test_zero_delta_dropped_regardless_of_used_incident_ids() -> None:
+    """A 0.0 delta is a no-op and is always dropped, whether or not the
+    gate is active (even in the back-compat None/None call shape)."""
+    out_gated = record_reflection(
+        {"a": 0.0}, "medium", "r", used_incident_ids=["a"], retrieved_incident_ids=["a"]
+    )
+    assert out_gated["incident_score_deltas"] == {}
+
+    out_backcompat = record_reflection({"a": 0.0}, "medium", "r")
+    assert out_backcompat["incident_score_deltas"] == {}
+
+
+def test_none_ids_reproduce_pre_phase1_behavior_exactly() -> None:
+    """Explicit backward-compatibility pin: omitting both new params must
+    behave exactly like the pre-Phase-1 tool for non-zero deltas -- no
+    id-based gating applied, only the existing clamp."""
+    out = record_reflection({"a": 0.15, "b": -0.1, "c": 5.0}, "high", "r")
+    assert out["incident_score_deltas"] == {"a": 0.15, "b": -0.1, "c": 0.2}
+    assert out["_debug"]["positive_dropped_count"] == 0
+    assert out["_debug"]["negative_dropped_count"] == 0
+
+
+def test_id_not_in_retrieved_incident_ids_is_dropped() -> None:
+    """A hallucinated id that was never actually retrieved can't be
+    verified against either gate -- drop it, whichever sign the delta
+    has, even if the reflection agent also (wrongly) claims it was used."""
+    out = record_reflection(
+        {"ghost-pos": 0.15, "ghost-neg": -0.1, "real": 0.1},
+        "medium",
+        "r",
+        used_incident_ids=["ghost-pos", "ghost-neg", "real"],
+        retrieved_incident_ids=["real"],
+    )
+    assert out["incident_score_deltas"] == {"real": 0.1}
+    assert out["_debug"]["positive_dropped_count"] == 1
+    assert out["_debug"]["negative_dropped_count"] == 1
+
+
+def test_negative_cap_disabled_when_retrieved_incident_ids_omitted() -> None:
+    """`retrieved_incident_ids=None` disables both the retrieved-universe
+    filter and the negative cap, independently of `used_incident_ids`."""
+    out = record_reflection(
+        {"a": -0.2, "b": -0.2, "c": -0.2},
+        "low",
+        "r",
+        used_incident_ids=[],
+    )
+    assert out["incident_score_deltas"] == {"a": -0.2, "b": -0.2, "c": -0.2}
+    assert out["_debug"]["negative_dropped_count"] == 0
+
+
+def test_positive_gate_disabled_but_retrieved_universe_filter_still_applies() -> None:
+    """`used_incident_ids=None` disables the "must be used" check for
+    positive deltas, but if `retrieved_incident_ids` IS known, the
+    retrieved-universe filter still applies independently -- the two
+    gates are controlled by their own parameter, not paired."""
+    out = record_reflection(
+        {"in_kb": 0.15, "ghost": 0.1},
+        "medium",
+        "r",
+        retrieved_incident_ids=["in_kb"],
+    )
+    assert out["incident_score_deltas"] == {"in_kb": 0.15}
+    assert "ghost" not in out["incident_score_deltas"]
+    assert out["_debug"]["positive_dropped_count"] == 1
+
+
+def test_malformed_id_list_arguments_are_ignored_gracefully() -> None:
+    """A non-list value for either new param must degrade to "not
+    provided" (gate disabled) rather than raising."""
+    out = record_reflection(
+        {"a": 0.1},
+        "medium",
+        "r",
+        used_incident_ids="not-a-list",  # type: ignore[arg-type]
+        retrieved_incident_ids=123,  # type: ignore[arg-type]
+    )
+    assert out["incident_score_deltas"] == {"a": 0.1}
+
+
+def test_debug_key_present_and_does_not_leak_into_deltas() -> None:
+    out = record_reflection({"a": 0.1}, "high", "r")
+    assert "_debug" in out
+    assert set(out["_debug"].keys()) == {"positive_dropped_count", "negative_dropped_count"}
+    assert "_debug" not in out["incident_score_deltas"]

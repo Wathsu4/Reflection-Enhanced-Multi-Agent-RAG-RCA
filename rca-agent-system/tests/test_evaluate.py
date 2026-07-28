@@ -197,3 +197,59 @@ def test_render_markdown_report_contains_required_sections() -> None:
     assert "# RCA pipeline evaluation" in md
     assert "## Per-scenario" in md
     assert "| a |" in md
+
+
+# ---------- _apply_reflection_diagnostics (Tier 0 Phase 1) ----------
+
+
+class _FakeFunctionResponse:
+    def __init__(self, name: str, response: dict) -> None:
+        self.name = name
+        self.response = response
+
+
+class _FakeEvent:
+    def __init__(self, function_responses: list) -> None:
+        self._function_responses = function_responses
+
+    def get_function_responses(self) -> list:
+        return self._function_responses
+
+
+def test_apply_reflection_diagnostics_populates_from_debug_payload() -> None:
+    result = ev.ScenarioResult(id="s", expected_incident_id=None)
+    event = _FakeEvent(
+        [
+            _FakeFunctionResponse(
+                "record_reflection",
+                {"_debug": {"positive_dropped_count": 2, "negative_dropped_count": 1}},
+            )
+        ]
+    )
+    ev._apply_reflection_diagnostics(result, event)
+    assert result.reflection_positive_dropped_count == 2
+    assert result.reflection_negative_dropped_count == 1
+
+
+def test_apply_reflection_diagnostics_ignores_other_tool_responses() -> None:
+    result = ev.ScenarioResult(id="s", expected_incident_id=None)
+    event = _FakeEvent([_FakeFunctionResponse("retrieve_incidents", {"hits": []})])
+    ev._apply_reflection_diagnostics(result, event)
+    assert result.reflection_positive_dropped_count is None
+    assert result.reflection_negative_dropped_count is None
+
+
+def test_apply_reflection_diagnostics_handles_missing_debug_key() -> None:
+    result = ev.ScenarioResult(id="s", expected_incident_id=None)
+    event = _FakeEvent([_FakeFunctionResponse("record_reflection", {"status": "recorded"})])
+    ev._apply_reflection_diagnostics(result, event)
+    assert result.reflection_positive_dropped_count is None
+    assert result.reflection_negative_dropped_count is None
+
+
+def test_apply_reflection_diagnostics_handles_events_without_the_method() -> None:
+    """Events that don't expose `get_function_responses` at all (e.g. a
+    bare object) must not raise -- this is best-effort instrumentation."""
+    result = ev.ScenarioResult(id="s", expected_incident_id=None)
+    ev._apply_reflection_diagnostics(result, object())
+    assert result.reflection_positive_dropped_count is None
