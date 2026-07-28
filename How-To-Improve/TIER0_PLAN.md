@@ -499,40 +499,71 @@ other test rewrites.
 **Goal:** guarantee no incident can be permanently buried by the ranking formula.
 
 **Changes:**
-- [ ] `rca_system/tools/retrieve_incidents.py`: change the sort key per the §4 formula. Update
+- [x] `rca_system/tools/retrieve_incidents.py`: change the sort key per the §4 formula. Update
       the function's docstring (remember: **Gemini reads this docstring** to decide how to call
       the tool — review the wording change for clarity from the calling model's perspective, not
-      only a human reader's).
+      only a human reader's). Extracted the bonus formula into a small `_exploration_bonus(
+      usage_count)` helper for direct unit testability (not called out explicitly by the plan, but
+      needed to test the "never exceeds the weight" / monotonic-decay properties without depending
+      on the fake embedding's exact similarity output).
 
 **Tests (`tests/test_retrieve_incidents.py`):**
-- [ ] New: an incident with `success_score=0.0` and `usage_count=0` ranks **above** a competing
+- [x] New: an incident with `success_score=0.0` and `usage_count=0` ranks **above** a competing
       incident with a low-but-nonzero score and a high `usage_count`, when raw similarity is
-      comparable — proves the starvation floor works.
-- [ ] New: an incident with `success_score=0.0` does **not** outrank a genuinely strong match
+      comparable — proves the starvation floor works. —
+      `test_zeroed_incident_outranks_low_score_high_usage_competitor` (chosen numbers hold for
+      *any* similarity in [0,1], not just the fake embedding's actual output — see its docstring).
+- [x] New: an incident with `success_score=0.0` does **not** outrank a genuinely strong match
       (high similarity, `success_score` near neutral) — proves the bonus doesn't overwhelm real
-      signal. Pick concrete numbers and show the arithmetic in the test.
-- [ ] Regression: `test_dynamic_reranking_boosts_high_score_hits` must still pass unmodified —
+      signal. Pick concrete numbers and show the arithmetic in the test. —
+      `test_exploration_bonus_does_not_overwhelm_a_strong_match`.
+- [x] Regression: `test_dynamic_reranking_boosts_high_score_hits` must still pass unmodified —
       both records in that test have `usage_count=0`, so the bonus term is identical for both and
       cancels out of the comparison; if this test needs to change, something is wrong with the
-      formula's tie-breaking, not the test.
-- [ ] New: bonus magnitude is bounded — verify at `usage_count=0` the bonus never exceeds
-      `exploration_bonus_weight` (i.e. the formula can't blow up for any valid input).
+      formula's tie-breaking, not the test. — Passes unmodified, confirmed.
+- [x] New: bonus magnitude is bounded — verify at `usage_count=0` the bonus never exceeds
+      `exploration_bonus_weight` (i.e. the formula can't blow up for any valid input). —
+      `test_exploration_bonus_never_exceeds_the_configured_weight` (also asserts monotonic decay
+      across usage_count 0-49).
 
-**Checkpoint:**
-- [ ] Small script or test simulating N=5 consecutive "neutral" retrievals of a
+**Deviation (found during implementation, documented per the plan's own rule):** the checkpoint's
+literal framing — "confirm its rank... improves as `usage_count` climbs... of a zeroed-out
+incident" — would mean *that same* incident's own usage_count climbing, which actually
+**decreases** its own bonus (the formula explicitly "decays toward 0 as an incident accumulates
+retrievals", §4). Also, architecturally, `retrieve_incidents` only *re-ranks* the k items ChromaDB's
+raw cosine search already selected — the exploration bonus can never pull in an item ChromaDB's ANN
+search excluded, so "resurfacing from outside the top-k" isn't actually possible via this
+mechanism; only *ordering within* an already-returned candidate set changes. The test
+(`test_starved_incident_outranks_competitor_as_its_own_usage_climbs`) demonstrates the real,
+correct mechanism instead: a never-retrieved incident's constant max bonus eventually outlasts a
+frequently-retrieved *competitor's* decaying one — which is what actually prevents permanent
+burial. Not raised as a blocker (no ask-the-user needed) since the underlying formula is exactly
+per §4 and the test still proves the intended "no permanent burial" property; only the checkpoint
+prose's phrasing needed correcting here.
+
+**Checkpoint — results recorded 2026-07-28:**
+- [x] Small script or test simulating N=5 consecutive "neutral" retrievals of a
       zeroed-out incident (via direct `IncidentMemory` calls, no live Gemini needed) — confirm
       its rank among a fixed candidate set improves as `usage_count` climbs even while
-      `success_score` stays at `0.0`. This is a pure-Python checkpoint, no API cost.
+      `success_score` stays at `0.0`. This is a pure-Python checkpoint, no API cost. — Implemented
+      as `test_starved_incident_outranks_competitor_as_its_own_usage_climbs` (see the deviation
+      note above for the exact mechanism demonstrated). All 9 tests in the file pass; full suite
+      154 passed, 0 failed.
 
 **Critique checklist:**
-- [ ] Could the exploration bonus ever change the **order** of the top-1 result in a way that
+- [x] Could the exploration bonus ever change the **order** of the top-1 result in a way that
       degrades `expected_incident_retrieval_recall`? Re-run `evaluate.py --ablation none --limit
       5` and confirm recall@1 for in-domain scenarios is unaffected — this is exactly the kind of
-      side effect a well-intentioned bonus term can cause and it's cheap to check.
-- [ ] Is `usage_count` reset anywhere unexpectedly (e.g. by `reset_memory.py`, which re-seeds
+      side effect a well-intentioned bonus term can cause and it's cheap to check. — Ran on a
+      freshly-reset KB: Recall@5 **1.0**, MRR **1.0**, nDCG@5 **1.0**, keyword accuracy 0.8 (4/5
+      exact-or-partial) — retrieval recall fully unaffected.
+- [x] Is `usage_count` reset anywhere unexpectedly (e.g. by `reset_memory.py`, which re-seeds
       from scratch) — confirm the exploration bonus behaves sanely immediately after a reset
       (every incident at `usage_count=0`, so the bonus is uniform and effectively a no-op until
-      usage diverges — verify this is true and desired, not an oversight).
+      usage diverges — verify this is true and desired, not an oversight). — Confirmed desired:
+      `build_record()` never sets `usage_count`, so every freshly-seeded record defaults to 0
+      (dataclass default). Added an explicit assertion to
+      `test_seeder_produces_neutral_success_score` pinning this.
 
 ---
 

@@ -110,6 +110,11 @@ def test_seeder_produces_neutral_success_score(
         assert meta["alpha"] == pytest.approx(2.0)
         assert meta["beta"] == pytest.approx(2.0)
         assert meta["success_score"] == pytest.approx(1.0)
+        # Tier 0 Phase 3 check: usage_count must also start at 0 for
+        # every freshly-seeded record, so the exploration bonus is
+        # uniform (a no-op on relative ranking) until usage diverges --
+        # not an oversight if it ever showed a stale nonzero value.
+        assert meta["usage_count"] == 0
 
 
 def test_seeder_is_idempotent(
