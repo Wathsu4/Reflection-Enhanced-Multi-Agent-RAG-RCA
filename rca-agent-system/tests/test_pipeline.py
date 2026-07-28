@@ -122,9 +122,14 @@ def test_retrieval_agent_has_retrieve_incidents_tool() -> None:
     assert "retrieve_incidents" in tool_names
 
 
-def test_reflection_agent_has_record_reflection_tool() -> None:
+def test_reflection_agent_has_ensemble_reflect_tool() -> None:
+    """Tier 0 Phase 4: `reflection_agent`'s tool is `ensemble_reflect`
+    (it internally fans out and aggregates multiple samples), not the
+    old single-shot `record_reflection` -- `record_reflection` itself is
+    unchanged and still directly unit-tested, just no longer wired to
+    this agent as a Gemini-callable tool."""
     tool_names = {_tool_name(t) for t in reflection_agent.tools}
-    assert "record_reflection" in tool_names
+    assert "ensemble_reflect" in tool_names
 
 
 def _schema_has_forbidden_keys(schema: object) -> bool:
@@ -148,30 +153,21 @@ def _schema_has_forbidden_keys(schema: object) -> bool:
     return False
 
 
-def test_record_reflection_tool_schema_has_no_additional_properties_or_any_of() -> None:
+def test_ensemble_reflect_tool_schema_has_no_additional_properties_or_any_of() -> None:
     """Regression pin for the google-adk `additional_properties` /
-    `Optional[list[str]]` schema bug (google/adk-python#5364): the
-    reflection agent's `record_reflection` tool declares
-    `used_incident_ids`/`retrieved_incident_ids` as `list[str] | None`,
-    which trips ADK's buggy pydantic.TypeAdapter fallback and 400s on
-    gemini-2.5-flash. `_RecordReflectionTool` hand-builds the schema to
-    avoid it -- this test fails loudly if that override ever regresses
-    (e.g. reverted back to a plain `FunctionTool`)."""
+    `Optional[list[str]]` schema bug (google/adk-python#5364), which
+    Phase 1 hit and Phase 4 sidesteps differently: `ensemble_reflect`
+    takes no Gemini-supplied arguments at all (only a `ToolContext`,
+    which ADK excludes from the schema), so its declared `parameters`
+    has no properties for the bug to ever attach to. Fails loudly if a
+    future change adds an `Optional[list[str]]`-shaped parameter here
+    without the same care Phase 1 had to take."""
     tool = next(
-        t for t in reflection_agent.tools if _tool_name(t) == "record_reflection"
+        t for t in reflection_agent.tools if _tool_name(t) == "ensemble_reflect"
     )
     decl = tool._get_declaration()  # noqa: SLF001 -- intentional internal check
     assert decl is not None
     assert not _schema_has_forbidden_keys(decl.parameters)
-    # And the params record_reflection's gating logic needs are present.
-    assert decl.parameters is not None
-    assert set(decl.parameters.properties or {}) >= {
-        "incident_score_deltas",
-        "overall_quality",
-        "rationale",
-        "used_incident_ids",
-        "retrieved_incident_ids",
-    }
 
 
 def test_memory_update_agent_has_apply_reflection_tool() -> None:

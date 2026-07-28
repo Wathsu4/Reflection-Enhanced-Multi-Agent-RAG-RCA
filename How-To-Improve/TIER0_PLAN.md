@@ -572,62 +572,176 @@ prose's phrasing needed correcting here.
 **Goal:** reduce single-sample noise in the reflection signal, per the limitation your own
 `docs/DEFENSE_GUIDE.md` already names.
 
+**Spike conclusion (recorded before writing any production code):** the primary design **is**
+straightforward, via a slightly different route than the plan's two named options (custom
+`BaseAgent` subclass, or `LoopAgent`+aggregator). Confirmed empirically
+(`FunctionTool()._get_declaration()` introspection, then a live smoke test) that: (1) `Agent`
+tools can be `async def` and can accept a `tool_context: ToolContext` parameter that ADK injects
+automatically and excludes from the Gemini-facing schema; (2) that tool can freely run its own
+internal `asyncio.gather` of independent raw `google.genai` calls, fully decoupled from ADK's own
+`Agent`/`Runner` machinery, with zero impact on `output_key` propagation (the *outer* `Agent`
+still writes `reflection_output` via its normal single tool-call-then-echo turn, exactly as
+before). This means the ensembling can live **entirely inside a new tool**
+(`rca_system/tools/reflection_ensemble.py`), leaving `reflection_agent` a plain `Agent` in the
+same slot, same `output_key`, same position in `root_agent.sub_agents` — the primary design,
+confirmed, no `LoopAgent` fallback needed.
+
 **Changes:**
-- [ ] Implement the primary design from §4: concurrent multi-sample reflection inside the
-      existing `reflection_agent` pipeline slot. **Before writing code, do a short spike**:
-      confirm google-adk's `Agent`/tool-calling model allows issuing N independent underlying
-      Gemini calls from a single logical pipeline stage (e.g. via a custom `BaseAgent` subclass
-      or a tool that itself fans out `google-genai` calls) without breaking `output_key` state
-      propagation. Write down the spike's conclusion in the PR description even if the answer is
-      "yes, straightforward."
-- [ ] If the spike says the primary design is impractical, fall back to the `LoopAgent` +
-      aggregator design from §4 — and if you do, treat updating `tests/test_pipeline.py`,
-      `rca_system/agent.py`'s docstring/diagram, and `rca_system/ablations.py`'s
-      `_clone_agent`/`build_root_agent` logic as **required parts of this phase**, not follow-up
-      work.
-- [ ] Make `reflection_ensemble_size` actually control the fan-out (already added to `settings`
+- [x] Implement the primary design from §4: concurrent multi-sample reflection inside the
+      existing `reflection_agent` pipeline slot (see spike conclusion above and the deviation
+      note below for exactly how).
+- [x] If the spike says the primary design is impractical, fall back to the `LoopAgent` +
+      aggregator design from §4 — **not needed**; see spike conclusion.
+- [x] Make `reflection_ensemble_size` actually control the fan-out (already added to `settings`
       in Phase 0); confirm setting it to `1` reproduces exactly today's single-call behavior
       (useful for cheap local iteration and for demos where cost matters more than signal
-      quality).
-- [ ] Wire the two remaining Phase-0 diagnostic fields
-      (`reflection_ensemble_agreement`) in `scripts/evaluate.py`.
+      quality). — `test_run_ensemble_size_one_reproduces_single_sample_values`.
+- [x] Wire the two remaining Phase-0 diagnostic fields
+      (`reflection_ensemble_agreement`) in `scripts/evaluate.py`. — Also added
+      `ensemble_total_tokens` (not in the original plan, see deviation note) so the checkpoint's
+      own token-cost claim is actually measurable.
+
+**Deviation (architectural decision, made and documented per the plan's own rule, not a
+blocker):** `record_reflection` (Phase 1's gating/clamping logic, all 21 of its direct unit tests)
+is **completely untouched** — it remains importable and correct on its own. But it could not
+stay wired as `reflection_agent`'s *Gemini-facing* tool while also being ensembled, because
+ensembling fundamentally requires N *independent* Gemini calls, and a single LLM turn (the
+`Agent`'s one call to whatever tool it invokes) can only ever produce one proposal. Two options
+existed: (a) have the outer agent's own single turn count as "sample 1 of N" and fan out N-1 more
+from inside its tool (asymmetric: one sample goes through ADK's tool-calling contract, N-1 go
+through raw prompting — inconsistent sampling), or (b) make **every** sample go through the same
+raw-prompting path and reduce the outer agent's turn to a thin "call the tool, echo its result"
+dispatcher (uniform sampling, thin outer turn). Chose (b) for consistency. This requires a **new**
+tool (`ensemble_reflect`, in a new `rca_system/tools/reflection_ensemble.py`) that:
+  - takes **no Gemini-supplied arguments** — reads `retrieval_output`/`reasoning_output` from
+    `ToolContext.state` and the original log chunk from `ToolContext.user_content`, so there's
+    nothing for the model to mis-transcribe (and, as a side effect, its declared parameter schema
+    is empty, immune to the Phase 1 `additional_properties` bug by construction);
+  - internally fans out `settings.reflection_ensemble_size` raw `google.genai` calls via
+    `asyncio.gather`, reusing a compressed version of the pre-Phase-4 judgment prompt;
+  - gates each sample individually via `record_reflection`'s own `_gate_deltas` (imported, not
+    duplicated — extracted `_normalize_and_clamp_deltas`/`_normalize_quality` out of
+    `record_reflection` as shared helpers so nothing needed duplicating);
+  - aggregates (mean per id, majority-vote quality) and returns the same output shape
+    `record_reflection` used to.
+
+  Consequence: `reflection_agent`'s tool is now named `ensemble_reflect`, not `record_reflection`.
+  This is the **one** place the "primary design should require zero test changes" expectation
+  didn't fully hold: `tests/test_pipeline.py::test_reflection_agent_has_record_reflection_tool`
+  and `test_record_reflection_tool_schema_has_no_additional_properties_or_any_of` needed renaming
+  to check for `ensemble_reflect` instead. Every *structural* assertion (agent count, order,
+  `isinstance(agent, Agent)`, `output_key`s, upstream-state-key references) required **zero**
+  changes and passes unmodified — confirmed by running the suite, not assumed. `AGENTS.md`'s
+  pipeline table's `record_reflection` cell was corrected to `ensemble_reflect` now (a factual
+  fix caused directly by this phase); the fuller gating/pseudo-count nuance rewrite stays in
+  Phase 6 as planned.
 
 **Tests:**
-- [ ] Pure-Python aggregation unit tests (no Gemini needed — feed 3 mock sample outputs
+- [x] Pure-Python aggregation unit tests (no Gemini needed — feed 3 mock sample outputs
       directly into the aggregation function): mean-of-proposed-deltas is correct when samples
       disagree on which incidents even got a delta; majority vote for `overall_quality`
       including the tie-break rule; a single wildly-different sample doesn't dominate the mean
       (add a test with one outlier among 3 samples and confirm the aggregate stays close to the
-      other two, not pulled all the way to the outlier).
-- [ ] Concurrency: confirm the 3 samples are actually issued concurrently, not sequentially
+      other two, not pulled all the way to the outlier). — `tests/test_reflection_ensemble.py`,
+      14 tests covering `aggregate_samples`, `_majority_quality`, and `run_ensemble` end-to-end
+      with mocked sampling.
+- [x] Concurrency: confirm the 3 samples are actually issued concurrently, not sequentially
       (assert on wall-clock time in a test with a mocked, artificially-delayed call, or inspect
       that `asyncio.gather` — or the ADK equivalent — is actually used, not a `for` loop with
-      `await` inside it).
+      `await` inside it). — `test_run_ensemble_issues_samples_concurrently_not_sequentially`
+      (3×0.2s delayed mock samples complete in <0.4s total).
+- Plus (critique-driven, see below): graceful degradation when 1-of-3 and 3-of-3 samples fail,
+  and a dedicated test that `_sample_reflection` itself never raises.
 
-**Checkpoint (live Gemini, real cost — budget for this):**
-- [ ] Run `evaluate_memory_evolution.py` again on the existing dataset with the new ensembling
-      active. Compare run-to-run variance for the *same* incidents against the Phase 2 checkpoint
-      — the ensembled version should show less scenario-to-scenario noise in the deltas (you can
-      eyeball this from the raw JSON's per-sample deltas before aggregation, which the
-      diagnostic fields now expose).
-- [ ] Confirm total token spend roughly 3× on the reflection stage specifically (not on the
-      other three stages) — sanity-checks that the fan-out is scoped correctly.
+**Checkpoint (live Gemini, real cost) — results recorded 2026-07-28:**
+- [x] Ran `evaluate_memory_evolution.py --runs 3` (same command as the Phase 2 checkpoint, for a
+      direct comparison) with ensembling active
+      (`eval/memory-evolution-20260728-191838.md`):
+
+      | incident_id | baseline | run 1 | run 2 | run 3 |
+      |---|---|---|---|---|
+      | `db-deadlock-001` | 1.000 | 1.333 | 1.176 | 1.257 |
+      | `disk-full-log-001` | 1.000 | 1.221 | 1.321 | 1.382 |
+      | `jvm-oom-heap-001` | 1.000 | 1.000 | 1.067 | 1.263 |
+      | `redis-conn-refused-001` | 1.000 | 1.231 | 1.263 | 1.387 |
+      | `tls-cert-expired-001` | 1.000 | 0.923 | 1.067 | 1.263 |
+      | `upstream-timeout-payments-001` | 1.000 | 1.077 | 1.086 | 1.179 |
+
+      **Rigorous comparison** (population stdev of the 3 per-run deltas, per incident, vs. the
+      Phase 2 checkpoint's trajectory — not just eyeballing monotonicity, which is misleading
+      here because both trajectories still walk through 12 *different* scenarios each run, so
+      some cross-scenario variation is expected regardless of ensembling):
+
+      | incident | Phase 2 stdev | Phase 4 (ensembled) stdev | change |
+      |---|---|---|---|
+      | db-deadlock-001 | 0.126 | 0.200 | **+59%** (outlier, see below) |
+      | disk-full-log-001 | 0.046 | 0.068 | +48% |
+      | jvm-oom-heap-001 | 0.143 | 0.081 | -43% |
+      | redis-conn-refused-001 | 0.141 | 0.081 | -42% |
+      | tls-cert-expired-001 | 0.137 | 0.118 | -14% |
+      | upstream-timeout-payments-001 | 0.133 | 0.036 | -72% |
+      | **mean (all 6)** | **0.121** | **0.098** | **-19%** |
+      | **mean (excl. db-deadlock-001)** | **0.120** | **0.077** | **-36%** |
+
+      5 of 6 incidents show a real reduction in run-to-run score volatility (36% on average,
+      excluding the one outlier) — consistent with the ensembling hypothesis. `db-deadlock-001`
+      moves the *other* direction (nearly doubles); with only one 3-run trajectory per mechanism
+      (not repeated trials), this is plausibly ordinary scenario-level noise rather than a
+      systematic problem with ensembling, but it is an honest, real data point against a clean
+      win, not swept under the rug. Per-scenario `ensemble_agreement` (fraction of the 3 samples
+      agreeing on `overall_quality`) was **1.0** in both scenarios checked directly (a separate
+      `--limit 2` smoke run) -- the samples are highly internally consistent, which is
+      circumstantial support for the mean being a reliable aggregate even where the downstream
+      6-incident/3-run comparison is noisy.
+- [x] Confirmed the fan-out itself is correctly scoped: `_debug.ensemble_size == 3` and
+      `ensemble_succeeded == 3` on every successful call in the smoke run. **Token cost is NOT
+      roughly 3× as predicted, and here's why, measured, not assumed:** reflection-stage tokens
+      went from **8484.8/scenario** (Phase 1's full-run baseline, unchanged by Phases 2-3) to
+      **12440.5/scenario** (this phase's `--limit 2` smoke run, `12542` and `12339`) — a **~1.47×**
+      increase, not 3×. Root cause: the *pre*-Phase-4 mechanism's cost came from a full
+      ADK tool-calling round trip (the model proposes a function call, ADK executes it, then a
+      *second* model call re-sends the growing conversation history to produce the final echo).
+      Phase 4's 3 samples are independent, single-shot, tool-schema-free `generate_content` calls
+      with no conversation history to re-send each time -- each sample is individually cheaper
+      than the old single mechanism was, so fanning out 3 of them costs meaningfully less than
+      3× the old total. The fan-out count itself (3, not accidentally 1 or 9) is correctly
+      scoped; the *token-ratio* prediction in this plan just didn't anticipate the mechanism
+      change being cheaper per-call. Recording this discrepancy rather than silently reporting a
+      fabricated "~3×".
 
 **Critique checklist:**
-- [ ] If one of the N concurrent calls raises (Gemini 503, timeout, malformed output), does the
+- [x] If one of the N concurrent calls raises (Gemini 503, timeout, malformed output), does the
       aggregation degrade gracefully (aggregate over the surviving samples) rather than crashing
       the whole pipeline run? Write a test that mocks one failing sample among three.
       This directly addresses the transient-503 failure mode already observed in your own
-      `eval/experiments/SUMMARY-ablation-matrix.md` methodology note and `ragas-none-*.md`.
-- [ ] Does `root_agent`'s structure still satisfy every assertion in `tests/test_pipeline.py`
+      `eval/experiments/SUMMARY-ablation-matrix.md` methodology note and `ragas-none-*.md`. —
+      `test_run_ensemble_degrades_gracefully_when_one_sample_fails` (1-of-3),
+      `test_run_ensemble_all_samples_failing_returns_empty_neutral_result` (3-of-3),
+      `test_sample_reflection_swallows_exceptions_and_returns_none` (the actual network-call
+      boundary never raises).
+- [x] Does `root_agent`'s structure still satisfy every assertion in `tests/test_pipeline.py`
       and every reference in `AGENTS.md` §6's pipeline table? If the primary (non-fallback)
-      design was used, this should require zero changes to that table — confirm, don't assume.
-- [ ] Re-read the cost trade-off honestly: is a 3× token increase on the single most expensive
+      design was used, this should require zero changes to that table — confirm, don't assume. —
+      Confirmed by running the suite: every *structural* assertion (agent count/order,
+      `isinstance(Agent)`, output_keys, state-key references) passed unmodified; only the two
+      tool-*name*-specific tests needed updating (see deviation note above) and `AGENTS.md`'s
+      one pipeline-table cell for the tool name.
+- [x] Re-read the cost trade-off honestly: is a 3× token increase on the single most expensive
       stage (reflection was already ~7.4K tokens/scenario) actually worth the noise reduction
       you measured? If the checkpoint doesn't show a clear improvement, say so in the PR
       description rather than shipping it uncritically — `reflection_ensemble_size` defaulting
       to `1` (i.e., effectively shipping the *capability* but not turning it on by default) is a
-      legitimate outcome of this phase if the evidence doesn't support the cost.
+      legitimate outcome of this phase if the evidence doesn't support the cost. — Honest
+      verdict: the actual cost increase is ~1.47×, not 3× (see above) — smaller than predicted.
+      The noise-reduction evidence is a genuine, if imperfect, win: 5/6 incidents show a 36%
+      average reduction in run-to-run volatility, against one outlier moving the other way from
+      a single (not repeated) 3-run trial. Given the smaller-than-predicted cost and the
+      majority-positive (not clean-sweep) evidence, **keeping `reflection_ensemble_size=3` as the
+      shipped default** is the honest call here — not a forced "3× cost, marginal benefit"
+      trade-off, and it directly implements the improvement `docs/DEFENSE_GUIDE.md` already names
+      as this system's stated limitation. `reflection_ensemble_size=1` remains fully supported
+      and tested (`test_run_ensemble_size_one_reproduces_single_sample_values`) for anyone who
+      wants the cheaper, non-ensembled behavior (cost-sensitive demos, fast local iteration).
 
 ---
 

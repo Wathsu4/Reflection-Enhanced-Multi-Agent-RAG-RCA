@@ -205,7 +205,7 @@ and is gitignored (`classifier-service/models/` in `.gitignore`).
 |---|---|---|---|---|---|
 | 1 | retrieval | `rca_system/agents/retrieval_agent.py` | user message | `retrieval_output` (JSON: query, hits) | `retrieve_incidents` |
 | 2 | reasoning | `rca_system/agents/reasoning_agent.py` | `retrieval_output`, user message | `reasoning_output` (JSON: hypothesis, confidence, suggested_actions, evidence, used_incident_ids) | _(none — pure LLM)_ |
-| 3 | reflection | `rca_system/agents/reflection_agent.py` | `retrieval_output`, `reasoning_output` | `reflection_output` (JSON: incident_score_deltas, overall_quality, rationale) | `record_reflection` |
+| 3 | reflection | `rca_system/agents/reflection_agent.py` | `retrieval_output`, `reasoning_output` | `reflection_output` (JSON: incident_score_deltas, overall_quality, rationale) | `ensemble_reflect` |
 | 4 | memory_update | `rca_system/agents/memory_update_agent.py` | `reasoning_output`, `reflection_output` | `final_output` (Markdown report) | `apply_reflection_to_memory` |
 
 - **Tools (`rca_system/tools/`):** `retrieve_incidents.py` does

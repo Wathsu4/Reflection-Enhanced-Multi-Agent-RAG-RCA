@@ -50,6 +50,48 @@ def _normalize_id_list(value: Any) -> list[str] | None:
     return None
 
 
+def _normalize_and_clamp_deltas(incident_score_deltas: Any) -> dict[str, float]:
+    """Reshape + clamp a raw `incident_score_deltas` argument into a
+    clean `{incident_id: delta}` dict with every value in
+    `[_DELTA_MIN, _DELTA_MAX]`.
+
+    Defensive against the malformed shapes Gemini occasionally produces:
+    a list of `{incident_id, delta}` objects instead of a flat mapping,
+    non-numeric values, or a completely unrelated type. Never raises.
+    Shared by `record_reflection` (single-sample) and the Phase 4
+    ensemble orchestrator (multi-sample) so the clamp bound can't drift
+    out of sync between the two call sites.
+    """
+    if not isinstance(incident_score_deltas, dict):
+        if isinstance(incident_score_deltas, list):
+            incident_score_deltas = {
+                str(item.get("incident_id") or item.get("id")): float(
+                    item.get("delta") or item.get("score") or 0.0
+                )
+                for item in incident_score_deltas
+                if isinstance(item, dict)
+            }
+        else:
+            incident_score_deltas = {}
+
+    clamped: dict[str, float] = {}
+    for incident_id, raw in incident_score_deltas.items():
+        try:
+            delta = float(raw)
+        except (TypeError, ValueError):
+            continue
+        clamped[str(incident_id)] = max(_DELTA_MIN, min(_DELTA_MAX, delta))
+    return clamped
+
+
+def _normalize_quality(overall_quality: Any) -> str:
+    """Normalise a raw `overall_quality` argument to one of
+    "high"/"medium"/"low", or "unknown" if unrecognisable. Shared by
+    `record_reflection` and the Phase 4 ensemble orchestrator."""
+    quality = overall_quality.strip().lower() if isinstance(overall_quality, str) else ""
+    return quality if quality in _VALID_QUALITIES else "unknown"
+
+
 def _gate_deltas(
     clamped: dict[str, float],
     used_ids: list[str] | None,
@@ -158,34 +200,8 @@ def record_reflection(
         reporting how many proposed deltas the gate dropped, by sign --
         evaluation-only; the production pipeline ignores it.
     """
-    if not isinstance(incident_score_deltas, dict):
-        # Defensive: Gemini sometimes hands us a list of {id, delta}
-        # objects instead of a flat mapping. Normalise on the spot
-        # rather than failing the whole pipeline.
-        if isinstance(incident_score_deltas, list):
-            incident_score_deltas = {
-                str(item.get("incident_id") or item.get("id")): float(
-                    item.get("delta") or item.get("score") or 0.0
-                )
-                for item in incident_score_deltas
-                if isinstance(item, dict)
-            }
-        else:
-            incident_score_deltas = {}
-
-    clamped: dict[str, float] = {}
-    for incident_id, raw in incident_score_deltas.items():
-        try:
-            delta = float(raw)
-        except (TypeError, ValueError):
-            continue
-        clamped[str(incident_id)] = max(_DELTA_MIN, min(_DELTA_MAX, delta))
-
-    quality = overall_quality.strip().lower() if isinstance(overall_quality, str) else ""
-    if quality not in _VALID_QUALITIES:
-        # Don't silently drop a misformatted verdict; tag it as unknown
-        # so reviewers can spot misbehaving reflection runs in logs.
-        quality = "unknown"
+    clamped = _normalize_and_clamp_deltas(incident_score_deltas)
+    quality = _normalize_quality(overall_quality)
 
     gated, positive_dropped, negative_dropped = _gate_deltas(
         clamped,
