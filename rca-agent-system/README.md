@@ -17,8 +17,9 @@ rca_system/
 ├── memory/
 │   └── chroma_store.py      # IncidentMemory: add / query / update_score / mark_retrieved
 ├── tools/
-│   ├── retrieve_incidents.py        # similarity * success_score re-ranking
-│   ├── record_reflection.py         # clamps deltas to [-0.2, +0.2]
+│   ├── retrieve_incidents.py        # similarity * success_score + exploration bonus re-ranking
+│   ├── record_reflection.py         # clamps deltas to [-0.2, +0.2] + deterministic gating
+│   ├── reflection_ensemble.py       # fans out N concurrent reflection samples, aggregates
 │   └── update_memory.py             # apply_reflection_to_memory
 └── agents/
     ├── retrieval_agent.py           # output_key="retrieval_output"
@@ -27,14 +28,15 @@ rca_system/
     └── memory_update_agent.py       # output_key="final_output" (Markdown)
 
 server.py                            # FastAPI via ADK get_fast_api_app()
-seed/incidents/*.md                  # 6 starter incident records (Phase 6 spec)
+seed/incidents/*.md                  # 14 incident records (6 original + 8 added in Tier 0 Phase 5)
 scripts/
 ├── seed_knowledge_base.py           # idempotent
 ├── reset_memory.py                  # wipe + reseed
 ├── evaluate.py                      # accuracy + latency on eval dataset
 └── evaluate_memory_evolution.py     # headline novelty experiment
 eval/
-├── incidents.jsonl                  # 15 hand-authored scenarios
+├── incidents.jsonl                  # 15 hand-authored scenarios (canonical, 6-incident KB)
+├── incidents_tier0_validation.jsonl # 31 scenarios against the full 14-incident KB
 └── README.md                        # methodology + how to run
 data/                                # gitignored: chroma + sessions.db
 ```
@@ -69,12 +71,12 @@ cp .env.example .env
 
 ## Seed the knowledge base
 
-The 6 starter incidents under `seed/incidents/` are loaded into Chroma
+The 14 incidents under `seed/incidents/` are loaded into Chroma
 with one command. Idempotent — safe to run on every deploy.
 
 ```bash
 uv run python scripts/seed_knowledge_base.py
-# → "Seeded 6 incident(s). Collection now contains 6 entries."
+# → "Seeded 14 incident(s). Collection now contains 14 entries."
 ```
 
 ## Run
@@ -113,7 +115,7 @@ curl http://localhost:8000/list-apps
 
 ```bash
 uv run pytest -q
-# → 85+ tests across chroma_store, tools, agents, pipeline composition,
+# → 170+ tests across chroma_store, tools, agents, pipeline composition,
 #   server routes, evaluator helpers.
 ```
 

@@ -31,10 +31,17 @@ def apply_reflection_to_memory(
 
     Args:
         incident_score_deltas: Map of incident_id (string) to score delta
-            (number). The reflection tool already clamps deltas to
-            [-0.2, +0.2]; this function clamps the resulting score to
-            [0.0, 2.0] so a successful incident never accumulates an
-            unbounded reputation.
+            (number). By the time a delta reaches here it has already
+            been clamped to [-0.2, +0.2] and deterministically gated
+            (Tier 0 Phase 1: dropped if not genuinely used / zero /
+            over the per-call negative cap -- see
+            `rca_system/tools/record_reflection.py`). This function
+            hands the delta to `IncidentMemory.update_score`, which
+            converts it to a pseudo-count and folds it into the
+            incident's alpha/beta prior (Tier 0 Phase 2); the resulting
+            `success_score = 2*alpha/(alpha+beta)` is bounded to
+            (0.0, 2.0) by construction, not by an explicit clamp, and
+            asymptotically resists any single run dominating it.
 
     Returns:
         A dict with key `updated`, mapping each *processed* incident_id

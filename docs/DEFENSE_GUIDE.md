@@ -733,22 +733,44 @@ core sentence; expand if pressed.
 
 **Q: How do you know score updates aren't random noise?**
 
-> "**The memory-evolution evaluation runs the same in-domain
-> scenarios twice and measures whether the *direction* of drift is
-> consistent.** A noise process produces roughly equal probability of
-> boost vs demote per incident; a real signal produces consistent
-> direction. The drift-summary numbers in
+> "**Three layers of evidence, from the raw call up to the whole
+> system.** At the single-call level, each reflection judgment is now
+> an aggregate of three independent Gemini samples, not one — a
+> validation run showed run-to-run score volatility drop by roughly a
+> third versus single-sampling for five of six incidents (one incident
+> moved the other way, which I report rather than hide). At the
+> delta level, a positive delta is deterministically *dropped, not
+> just accepted*, unless the incident was actually cited as used by
+> the reasoning stage — so a delta reflects demonstrated relevance, not
+> just a plausible-sounding score Gemini happened to emit. At the
+> system level, the memory-evolution evaluation runs the same in-domain
+> scenarios and measures whether the *direction* of drift is
+> consistent — a noise process produces roughly equal boost/demote
+> probability per incident; the actual run showed twelve of fourteen
+> incidents boosted and zero demoted. The drift-summary numbers in
 > `eval/memory-evolution-{timestamp}.md` show that signal."
 
 **Q: What stops a malicious or incorrect reflection from poisoning memory?**
 
-> "**Two safeguards.** First, deltas are clamped to plus-or-minus
-> zero point two per call, so no single reflection can dominate.
-> Second, scores are clamped to zero through two, so a bad streak
-> can't drive an incident negative or unboundedly large. A more
-> robust production version would add cool-downs and per-source rate
-> limits, which the architecture supports but I didn't implement for
-> the prototype."
+> "**Four independent safeguards, each closing a different failure
+> mode.** Deltas are clamped to plus-or-minus zero point two per call,
+> so no single reflection can dominate. A positive delta is
+> deterministically gated on the incident actually being cited as used
+> by the reasoning stage — a hopeful or hallucinated 'this helped' from
+> reflection alone isn't enough. Negative deltas are capped *in count*
+> per call, not just magnitude, so one skeptical pass can't demote most
+> of the retrieved set at once — this closes a real bug I found and
+> fixed: the original single-sample design produced exactly this
+> pile-on, and the ablation showing the 'freeze memory updates'
+> variant beating the live one was the evidence that caught it. And
+> scores are derived from a Bayesian pseudo-count (alpha/beta) rather
+> than accumulated linearly, so the *effective* damping increases the
+> more evidence an incident has already accumulated — a single bad
+> reflection matters less against an incident with a long track record
+> than against a brand-new one. A production version would add
+> cool-downs and per-source rate limits on top of these; the
+> architecture supports it but I didn't implement it for the
+> prototype."
 
 **Q: What if all seeded incidents are irrelevant to a real production log?**
 
@@ -818,12 +840,23 @@ core sentence; expand if pressed.
 
 **Q: What's the limitation of this approach you're most aware of?**
 
-> "**The reflection agent is itself a Gemini call, so the quality of
-> the score signal is bounded by Gemini's calibration.** A reflection
-> that misjudges relevance produces a wrong score update. Mitigation
-> is the per-call delta clamp, but a stronger system would use
-> multiple reflection samples and aggregate. I report this explicitly
-> in the limitations section of the thesis."
+> "**The calibration constants are reasoned defaults, not the product
+> of a systematic search.** Things like the negative-delta cap
+> fraction, the pseudo-count prior strength, and the exploration-bonus
+> weight were chosen by reasoning through the failure mode each one
+> closes and validated on a still-bounded fourteen-incident knowledge
+> base — they're defensible, not proven optimal, and a larger or more
+> adversarial production knowledge base might need different values. I
+> did already fix the limitation I'd have named a few weeks ago —
+> the reflection agent was a single, unaggregated Gemini call, so its
+> score signal was bounded by whatever that one call happened to
+> produce. It's now an ensemble of three independent samples, gated and
+> aggregated, which measurably reduced run-to-run noise on most
+> incidents. But that fix cost roughly fifty percent more tokens on the
+> reflection stage for a benefit I can show is real but not dramatic —
+> which itself is a limitation worth being honest about: I don't yet
+> have strong evidence for exactly how many samples are worth paying
+> for, only that three is better than one on this dataset."
 
 **Q: What if you don't know the answer?**
 

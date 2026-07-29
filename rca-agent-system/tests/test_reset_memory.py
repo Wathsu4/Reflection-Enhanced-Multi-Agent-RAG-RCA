@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from rca_system.memory.chroma_store import IncidentMemory, IncidentRecord
+from rca_system.memory.chroma_store import IncidentMemory
 from scripts import reset_memory as reset_module
 from scripts import seed_knowledge_base as seeder
 from tests._fake_embed import FakeEmbeddingFunction

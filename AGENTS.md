@@ -124,10 +124,10 @@ cd classifier-service && uv run pytest -q
 # Skip model-dependent tests on machines without the model:
 #   CLASSIFIER_SKIP_MODEL_TESTS=1 uv run pytest -q
 
-# Agent system (~85 tests; uses FakeEmbeddingFunction so no model download)
+# Agent system (~170 tests; uses FakeEmbeddingFunction so no model download)
 cd rca-agent-system && uv run pytest -q
 
-# Frontend (~145 tests; jsdom, no live network)
+# Frontend (~173 tests; jsdom, no live network)
 cd frontend && pnpm test
 ```
 
@@ -151,6 +151,11 @@ required vars. In practice you copy each sub-project's
 | `CHROMA_COLLECTION` | `incident_memory` | agent | |
 | `SESSION_DB_URL` | `sqlite+aiosqlite:///./data/sessions.db` | agent | **Must** use `sqlite+aiosqlite://` (async driver), not plain `sqlite://`. |
 | `ALLOW_DEMO_RESET` | `0` | agent | Set to `1` to expose `POST /demo/reset-memory`. Default-deny because it's destructive. |
+| `MAX_NEGATIVE_DELTA_FRACTION` | `0.4` | agent | Tier 0 Phase 1: max fraction of the retrieved set that may receive a negative reflection delta per call. |
+| `SCORE_PRIOR_STRENGTH` | `2.0` | agent | Tier 0 Phase 2: initial alpha/beta pseudo-count prior for a fresh incident's score. |
+| `DELTA_TO_PSEUDOCOUNT_SCALE` | `0.2` | agent | Tier 0 Phase 2: divisor mapping a clamped delta to a pseudo-count. |
+| `EXPLORATION_BONUS_WEIGHT` | `0.1` | agent | Tier 0 Phase 3: weight on the anti-starvation term added to retrieval ranking. |
+| `REFLECTION_ENSEMBLE_SIZE` | `3` | agent | Tier 0 Phase 4: number of independent reflection samples aggregated per run; `1` reproduces pre-Tier-0 single-shot behavior. |
 | `CLASSIFIER_MODEL_PATH` | `./models/modernbert-log-severity-v1` | classifier | Relative to `classifier-service/`. |
 | `CLASSIFIER_DEVICE` | `auto` | classifier | `auto` / `cpu` / `cuda` / `mps` (Apple Silicon). |
 | `CLASSIFIER_PORT` | `8001` | classifier | |
@@ -208,16 +213,35 @@ and is gitignored (`classifier-service/models/` in `.gitignore`).
 | 3 | reflection | `rca_system/agents/reflection_agent.py` | `retrieval_output`, `reasoning_output` | `reflection_output` (JSON: incident_score_deltas, overall_quality, rationale) | `ensemble_reflect` |
 | 4 | memory_update | `rca_system/agents/memory_update_agent.py` | `reasoning_output`, `reflection_output` | `final_output` (Markdown report) | `apply_reflection_to_memory` |
 
-- **Tools (`rca_system/tools/`):** `retrieve_incidents.py` does
-  similarity × success_score re-ranking; `record_reflection.py`
-  clamps deltas to `[-0.2, +0.2]`; `update_memory.py` clamps the
-  resulting score to `[0.0, 2.0]`.
+- **Tools (`rca_system/tools/`):** `retrieve_incidents.py` re-ranks by
+  `similarity * success_score + exploration_bonus` (Tier 0 Phase 3 — a
+  small, decaying anti-starvation term so a demoted-but-rarely-retrieved
+  incident can't be permanently buried; `settings.exploration_bonus_weight`).
+  `record_reflection.py` clamps deltas to `[-0.2, +0.2]` and
+  deterministically **gates** them (Tier 0 Phase 1 — a positive delta
+  survives only if the incident was actually cited as used; negative
+  deltas are capped in count by `settings.max_negative_delta_fraction`;
+  exact-zero deltas are always dropped). It's no longer wired directly
+  to Gemini as a tool (see the reflection row below) but its gating
+  logic (`_gate_deltas`) is reused by `reflection_ensemble.py`, and it
+  remains fully unit-tested on its own. `reflection_ensemble.py` (Tier 0
+  Phase 4) is the tool `reflection_agent` actually calls: internally
+  fans out `settings.reflection_ensemble_size` independent, concurrent
+  Gemini samples (`asyncio.gather`), gates each one, and aggregates
+  (mean deltas, majority-vote quality) before returning. `update_memory.py`
+  hands the (already clamped + gated) delta to `IncidentMemory.update_score`.
 - **ChromaDB (`rca_system/memory/chroma_store.py`):**
   PersistentClient, cosine distance, `all-MiniLM-L6-v2` embeddings
   (~90 MB, downloaded on first use). Tests use a `FakeEmbeddingFunction`
   (deterministic SHA-256 → 16-d vector) so CI never has to download.
   Incident metadata includes `success_score` (init 1.0, range
-  `[0.0, 2.0]`), `usage_count`, `last_used_ts`.
+  `(0.0, 2.0)` exclusive), `alpha`/`beta` pseudo-count fields (Tier 0
+  Phase 2 — `success_score = 2*alpha/(alpha+beta)`, recomputed by
+  `update_score` on every write, not stored independently), `usage_count`,
+  `last_used_ts`. The pseudo-count formulation is why the score is
+  asymptotically damped (each run's influence shrinks as alpha+beta
+  grows) instead of accumulating deltas linearly — see
+  `How-To-Improve/TIER0_PLAN.md` §7 for the full derivation.
 - **Server (`server.py`):** Uses ADK's `get_fast_api_app()`, then
   **strips ADK's default `/health` and `/list-apps`** so the custom
   implementations win. Routes to remember:
@@ -226,12 +250,19 @@ and is gitignored (`classifier-service/models/` in `.gitignore`).
   - `POST /demo/reset-memory` — **gated by `ALLOW_DEMO_RESET=1`** (else 403). Wipes ChromaDB and reseeds.
   - `/eval/*` — the evaluation console API (see below), mounted via
     `app.include_router(...)` from `rca_system/eval_api/routes.py`.
-- **Seed data:** 6 markdown incidents in `seed/incidents/`
-  (redis, jvm, deadlock, upstream, tls, disk). YAML frontmatter +
-  body. `scripts/seed_knowledge_base.py` upserts by `incident_id` so
-  re-running is safe.
+- **Seed data:** 14 markdown incidents in `seed/incidents/` (Tier 0
+  Phase 5 grew this from the original 6 — redis, jvm, deadlock,
+  upstream, tls, disk — by adding 8 more: k8s OOMKill, Kafka consumer
+  lag, DB connection-pool exhaustion, expired API key, CDN stale cache,
+  load-balancer health-check flapping, Node.js memory leak, stale
+  distributed lock). YAML frontmatter + body. `scripts/seed_knowledge_base.py`
+  upserts by `incident_id` so re-running is safe.
 - **Eval:** 15 scenarios in `eval/incidents.jsonl` (12 in-domain,
-  3 out-of-distribution). `scripts/evaluate.py` does keyword-overlap
+  3 out-of-distribution) — the canonical, demo-ready dataset, unchanged
+  by the Tier 0 KB expansion. `eval/incidents_tier0_validation.jsonl`
+  (31 scenarios: those same 15 plus 2 per new Phase 5 incident) is the
+  dataset to use when validating against the full 14-incident KB.
+  `scripts/evaluate.py` does keyword-overlap
   scoring (default) or LLM-as-judge with `--llm-judge`, **plus** per-stage
   latency, Gemini token counts, and the retrieval IR triad
   (Recall@k/MRR/nDCG). Both eval scripts accept
@@ -526,6 +557,14 @@ use a plain `FunctionTool(func=...)`. Subclass it and override
 `_RecordReflectionTool` in `rca_system/agents/reflection_agent.py`) — the real
 Python function keeps its natural signature for direct callers/tests; only the
 Gemini-facing schema needs the workaround.
+update (2026-07-28, Tier 0 Phase 4): `_RecordReflectionTool` no longer exists —
+`reflection_agent`'s tool is now `ensemble_reflect`
+(`rca_system/tools/reflection_ensemble.py`), which sidesteps this whole bug
+class a different way: it takes **no Gemini-supplied parameters at all** (only
+a `ToolContext`, which ADK excludes from the schema), so there's no
+`Optional[...]`-shaped parameter for the bug to attach to. The hand-built-schema
+technique described above is still valid and may be needed again for a future
+tool that *does* need an optional list/dict parameter.
 
 ### 2026-07-28 — Tier 0 Phase 2 changed the ChromaDB incident metadata schema
 context: `IncidentRecord` gained `alpha`/`beta` pseudo-count fields
@@ -541,3 +580,52 @@ already the documented, safe, idempotent way to get back to known-good state,
 no new tooling needed. Not backfilled on purpose (rejected in
 `TIER0_PLAN.md` SS3 as unwarranted complexity for a research prototype's fully
 regenerable vector index).
+
+### 2026-07-28 — `retrieve_incidents`'s re-rank only reorders what ChromaDB already selected
+context: implementing Tier 0 Phase 3's exploration bonus (anti-starvation term
+in `retrieve_incidents.py`), initially assumed the bonus could help a
+low-similarity, zeroed-out incident get pulled into the results at all.
+note: it can't, and this is architectural, not a bug: `retrieve_incidents`
+calls `memory.query(query, k=k)` (ChromaDB's own raw cosine-similarity ANN
+search) *first*, then re-ranks only the `k` items that search already
+returned. The custom `similarity * success_score + exploration_bonus` formula
+never influences *which* items ChromaDB selects, only their *order* within an
+already-selected set. So the exploration bonus's real effect is "a
+rarely-retrieved incident is more *prominent* among incidents already
+competitive on raw similarity for this query," not "a semantically-unrelated
+incident can resurface out of nowhere." If a future phase wants the latter, it
+would need to change what gets passed to `memory.query`'s `k`, not just the
+post-hoc re-rank.
+
+### 2026-07-28 — Tier 0 Phase 4: an ADK function tool can freely fan out its own concurrent Gemini calls
+context: implementing multi-sample reflection ensembling
+(`rca_system/tools/reflection_ensemble.py`) without changing `root_agent`'s
+structure (still exactly 4 named `Agent` sub-agents in `SequentialAgent`).
+note: an `async def` ADK `FunctionTool` can accept a `tool_context: ToolContext`
+parameter (auto-injected by ADK, excluded from the Gemini-facing schema as a
+bonus) and, from inside that one tool call, run its own `asyncio.gather` of
+independent raw `google.genai` calls (via `genai.Client(...).aio.models.generate_content`),
+fully decoupled from ADK's own `Agent`/`Runner` machinery. This is a much
+lighter-weight way to get "N independent LLM samples behind one pipeline slot"
+than a custom `BaseAgent` subclass or a `LoopAgent` + aggregator — no changes
+to `output_key` propagation, sub-agent count, or `isinstance(agent, Agent)`
+checks anywhere. Trade-off: those raw calls bypass ADK's own event-stream
+token/usage tracking entirely (see `scripts/evaluate.py`'s
+`_apply_reflection_diagnostics`, which now has to fold the tool's
+self-reported `_debug.ensemble_total_tokens` back into `stage_tokens`
+manually, or that cost is silently invisible to every token-based metric).
+
+### 2026-07-28 — a hardcoded `k` in a test can silently assume "k covers every record"
+context: Tier 0 Phase 5 grew `seed/incidents/` from 6 to 14 files;
+`tests/test_reset_memory.py` seeds the *real* seed directory (not a small
+fixture set) and broke.
+note: the test used `mem.query("anything", k=10)` to both look up one specific
+record's score and to sweep every record's score post-reset. At 6 total
+records this always returned everything; at 14, a top-10 similarity search
+over the deterministic-but-arbitrary `FakeEmbeddingFunction` can (and did)
+exclude the specific record being asserted on. Fixed by switching both
+lookups to `_collection.get(...)` (by id, and unfiltered for the full sweep)
+since the test was never actually about ranking. **Any test that reads the
+real `seed/incidents/` directory and needs to find or sweep specific records
+should use a direct `.get()`, not a `k=N` similarity `.query()`**, unless the
+test is specifically about rank order.

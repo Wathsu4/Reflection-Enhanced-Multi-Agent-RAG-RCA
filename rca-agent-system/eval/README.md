@@ -30,12 +30,18 @@ Outputs land under `eval/`:
 
 ## Dataset
 
-- `eval/incidents.jsonl` — 15 hand-authored scenarios:
+- `eval/incidents.jsonl` — 15 hand-authored scenarios, the canonical
+  demo-ready dataset, matched against the original 6-incident seed set:
   - 12 in-domain (two per seeded incident type — to test paraphrase
     robustness)
   - 3 out-of-distribution (DNS, rate limit, feature flag) — to test
     that the system gracefully says "no close match" rather than
     hallucinating one
+- `eval/incidents_tier0_validation.jsonl` — 31 scenarios: those same 15
+  plus 2 paraphrase-style scenarios per each of the 8 incidents Tier 0
+  Phase 5 added (`seed/incidents/`, now 14 total). Use `--dataset
+  eval/incidents_tier0_validation.jsonl` when you want to evaluate
+  against the full, larger knowledge base rather than the original 6.
 
 Each row has:
 
@@ -94,19 +100,32 @@ on get boosted (final score > 1.0); incidents retrieved but judged
 irrelevant get demoted (final score < 1.0). The drift summary at the
 bottom of the report counts each.
 
-A single run of the eval is necessarily noisy (one Gemini sample per
-scenario). Running twice over the same scenarios — the default — gives
-us a *reproducible direction of drift*, which is what the thesis claim
-requires.
+A single run of the eval is necessarily noisy: each scenario is still
+one draw through the pipeline, even though (as of Tier 0 Phase 4) the
+reflection step itself internally averages `settings.reflection_ensemble_size`
+(default 3) independent Gemini samples rather than trusting one. Running
+the eval twice over the same scenarios — the default — gives us a
+*reproducible direction of drift* across pipeline runs, which is what
+the thesis claim requires; ensembling reduces noise *within* a single
+run's reflection call, not across-run scenario variation.
 
 ## Caveats
 
 - Both scripts call Gemini end-to-end and so are subject to free-tier
   rate limits (~15 RPM). 12 in-domain scenarios × 4 sub-agents × 2 runs
   = 96 calls; budget ~10 minutes of wall time on a healthy connection.
+  Tier 0's reflection ensembling adds roughly 50% more tokens (not the
+  naively-expected 3x — see `How-To-Improve/TIER0_PLAN.md` §9) on the
+  reflection stage specifically; it does not change wall-clock latency
+  materially since the samples run concurrently.
 - `evaluate.py` uses the production knowledge base by default. Run
   `evaluate_memory_evolution.py` first if you want a clean baseline,
-  or use `scripts/reset_memory.py` directly.
+  or use `scripts/reset_memory.py` directly. **After pulling a change
+  that touches `rca_system/memory/chroma_store.py`'s incident schema
+  (e.g. Tier 0 Phase 2's `alpha`/`beta` pseudo-count fields) or
+  `seed/incidents/` (e.g. Tier 0 Phase 5's KB expansion), run `just
+  reset-demo` once** — old on-disk records don't retroactively gain new
+  metadata fields or new incidents.
 - LLM-as-judge accuracy floors out around 80-90% even for human-perfect
   hypotheses; treat its absolute numbers as a sanity check on the
   keyword score, not as ground truth.
