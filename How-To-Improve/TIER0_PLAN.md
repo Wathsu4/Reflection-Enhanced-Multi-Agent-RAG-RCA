@@ -751,57 +751,118 @@ tool (`ensemble_reflect`, in a new `rca_system/tools/reflection_ensemble.py`) th
 Tier 0 result, without turning this PR into a content-authoring project.
 
 **Changes:**
-- [ ] Author 6–12 new incident files in `seed/incidents/`, following the exact frontmatter
+- [x] Author 6–12 new incident files in `seed/incidents/`, following the exact frontmatter
       schema `scripts/seed_knowledge_base.py` requires (`incident_id, title, severity,
       root_cause, resolution, tags` + a markdown body — see `redis_connection_refused.md` as the
       template). Aim for genuinely distinct categories (not near-duplicates of the existing 6),
       so retrieval has real discrimination to do. Total KB size after this phase: ~12–18.
       **This is explicitly capped here — do not scale further in this PR; see §9 for the deferred
-      full-scale version.**
-- [ ] Create `eval/incidents_tier0_validation.jsonl` (new file — do **not** edit the canonical
+      full-scale version.** — Added exactly 8: `k8s-oom-kill-001` (Kubernetes OOMKilled),
+      `kafka-consumer-lag-001` (message-queue backlog), `db-pool-exhaustion-001` (connection-pool
+      leak), `api-key-expired-001` (third-party credential rotation), `cdn-stale-cache-001`
+      (CDN cache invalidation), `lb-health-check-flap-001` (load-balancer health-check tuning),
+      `node-memory-leak-001` (Node.js `EventEmitter` leak), `distributed-lock-stale-001`
+      (Redis lock with no TTL). Total KB: **14** incidents (within the 12–18 cap). Deliberately
+      avoided any DNS / rate-limit / feature-flag theming, since those are the three OOD
+      scenarios' territory and a matching incident would turn them in-domain by accident.
+- [x] Create `eval/incidents_tier0_validation.jsonl` (new file — do **not** edit the canonical
       `eval/incidents.jsonl`, which stays untouched so the existing demo-ready 15-scenario set
       keeps working exactly as-is) with 2 in-domain scenarios per new incident (mirroring the
       existing paraphrase-robustness pattern) plus the existing 15 scenarios' equivalents against
-      the larger KB.
+      the larger KB. — 31 scenarios total (15 existing + 16 new, 2 per new incident); canonical
+      `eval/incidents.jsonl` confirmed untouched (`git diff --stat` empty).
 
 **Tests:** no new unit tests expected in this phase; this is an evaluation/validation phase, not
 a code-change phase. If the new incident content reveals a bug in Phases 1–4, fix it as an
 explicit patch commit on this branch and note which earlier phase's checklist should have caught
-it (feed that back into this document for the next tier).
+it (feed that back into this document for the next tier). — **One bug found and fixed**:
+`tests/test_reset_memory.py::test_reset_removes_existing_dir_and_reseeds` seeded the *real*
+`seed/incidents/` directory and queried with a hardcoded `k=10` similarity search to find a
+specific record and to sweep every record's score. With only 6 incidents this always returned
+everything; at 14 it's possible (and, with the deterministic hash-based fake embedding, actually
+happened) for `k=10` to exclude the specific record being checked, breaking the test. This latent
+assumption (`k` covers "all records") predates Phase 5 — it should have been written as a direct
+by-id/full-collection `.get()` from the start, not a similarity `.query()`, since the test's
+intent was never "top-k similarity," it was "look up this exact record" / "check every record."
+Fixed by switching both lookups to `_collection.get(...)` (by id, and unfiltered for the full
+sweep), which is correct regardless of seed-set size. Feeding back: **future phases that add
+fixture data reading the real `seed/incidents/` directory should default to by-id lookups, not
+`k=N` similarity queries, unless the test is specifically about ranking.**
 
-**Checkpoint — this phase's checkpoint *is* the Tier 0 acceptance test:**
-- [ ] `just reset-demo` against the expanded seed set (temporarily point `CHROMA_PERSIST_DIR` at
+**Checkpoint — this phase's checkpoint *is* the Tier 0 acceptance test. Results recorded
+2026-07-28 (all runs against an isolated `CHROMA_PERSIST_DIR=./data/chroma-tier0-validation`,
+deleted afterward; the real `data/chroma` was untouched throughout and reset once at the end —
+see critique below):**
+- [x] `just reset-demo` against the expanded seed set (temporarily point `CHROMA_PERSIST_DIR` at
       a scratch dir, or use the eval scripts' own sandboxing — do not clobber your working demo
       KB while doing this).
-- [ ] Run the full ablation matrix (`none, reflection_off, memory_frozen, no_rag, cot_only,
+- [x] Run the full ablation matrix (`none, reflection_off, memory_frozen, no_rag, cot_only,
       retrieval_only, react`) via `scripts/evaluate.py --ablation <variant> --dataset
       eval/incidents_tier0_validation.jsonl` against the expanded KB. Use `--limit` smoke runs
-      first to catch obvious breakage before spending the full budget.
-- [ ] **Acceptance bar (write the actual numbers into this checklist when done):**
-  - `none`'s retrieval MRR and nDCG@5 are within `0.05` of `memory_frozen`'s (ideally at or
-    above it — the whole point of Tier 0 is closing this gap).
-  - `none`'s keyword accuracy (exact-or-partial) is not the worst of the 7 variants.
-  - No incident's `success_score` sits at the hard `0.0`/`2.0` clamp after this single
-    validation run (a sign Phase 2's dampening is working at this larger scale).
+      first to catch obvious breakage before spending the full budget. — `--limit` smoke ran for
+      all 7 variants first (caught nothing broken), then the full 31-scenario run for each:
+
+      | Variant | Keyword acc (E+P) | Recall@5 | MRR | nDCG@5 | Mean latency (s) | Mean tokens |
+      |---|---|---|---|---|---|---|
+      | **none** | **1.0** (22 exact/9 partial/0 miss) | 1.0 | **0.982** | **0.987** | 30.09 | 28131.6 |
+      | **memory_frozen** | 1.0 (20/11/0) | 1.0 | **1.0** | **1.0** | 30.88 | 28385.3 |
+      | reflection_off | 0.935 (21/8/2) | 1.0 | 0.982 | 0.987 | 16.65 | 12746.1 |
+      | no_rag | 0.935 (20/9/2) | n/a (no RAG) | n/a | n/a | 11.00 | 4544.9 |
+      | cot_only | 0.968 (15/15/1) | n/a (no RAG) | n/a | n/a | 8.87 | 4464.9 |
+      | retrieval_only | 0.323 (3/7/21) | 1.0 | 1.0 | 1.0 | 0.06 | n/a |
+      | react | 1.0 (23/8/0) | n/a (different topology) | n/a | n/a | 4.93 | 2910.2 |
+
+      Full artifacts: `eval/results-20260728-221713.{json,md}` (`none`),
+      `eval/experiments/results-{memory_frozen,reflection_off,no_rag,cot_only,retrieval_only,
+      react}-*.{json,md}`.
+- [x] **Acceptance bar (actual numbers) — ALL FOUR CRITERIA MET:**
+  - `none`'s retrieval MRR (0.982) and nDCG@5 (0.987) are within `0.05` of `memory_frozen`'s
+    (1.0/1.0) — gaps are **0.018** and **0.013** respectively. ✅ (Not fully closed at this KB
+    size/scenario mix — `none` still trails `memory_frozen` slightly — but both gaps are roughly
+    a quarter of the allowed tolerance, a dramatic improvement over the Phase 0 baseline's 0.208 /
+    0.156 gaps at the smaller KB.)
+  - `none`'s keyword accuracy (**1.0**) is not the worst of the 7 variants — worst is
+    `retrieval_only` (0.323, the deliberate zero-hallucination floor). `none` is in fact tied for
+    *best* alongside `memory_frozen` and `react`. ✅
+  - No incident's `success_score` sits at the hard `0.0`/`2.0` clamp after a single validation
+    run: ran `evaluate_memory_evolution.py --dataset eval/incidents_tier0_validation.jsonl --runs
+    1` (28 in-domain scenarios) on a fresh reset — final scores ranged from **1.000 to 1.333**
+    across all 14 incidents (12 boosted, 2 unchanged, **0 demoted** — not just "none at the
+    clamp," none even trended negative). ✅ See
+    `eval/memory-evolution-20260728-224856.md`.
   - `mean_top_retrieval_similarity` for in-domain scenarios does not regress versus the Phase 0
-    baseline (sanity check that the larger, more diverse KB didn't just make everything harder
-    to match for unrelated reasons, e.g. sloppily-written new incidents).
+    baseline: **0.641** (this run) vs **0.489** (Phase 0, `eval/results-20260727-222918.md`) —
+    higher, not lower. ✅ (The new incidents' narratives are, if anything, textually richer than
+    the original 6, which plausibly explains the increase; not a cause for concern either way
+    since the bar is "no regression.")
 
 **Critique checklist:**
-- [ ] Are the new incidents actually distinguishable from each other and from the original 6, or
+- [x] Are the new incidents actually distinguishable from each other and from the original 6, or
       did you accidentally author near-duplicates that don't add real retrieval difficulty?
       Spot-check by embedding two new incidents and confirming their similarity to each other is
-      lower than either's similarity to its own matching eval scenario.
-- [ ] Did this phase accidentally mutate the production/demo ChromaDB directory
+      lower than either's similarity to its own matching eval scenario. — Spot-checked 5
+      deliberately-confusable pairs with the **real** `all-MiniLM-L6-v2` embeddings (same-category
+      near-neighbors: k8s-oom-kill vs jvm-oom-heap, db-pool-exhaustion vs db-deadlock,
+      distributed-lock-stale vs db-deadlock, kafka-consumer-lag vs upstream-timeout,
+      node-memory-leak vs jvm-oom-heap). For every pair, the matching eval scenario's similarity
+      to its own incident (0.66–0.82) was clearly higher than its similarity to the confusable
+      competitor (0.27–0.54), and top-1 retrieval was correct in all 5 cases. Real discrimination
+      confirmed, not just distinct incident_ids.
+- [x] Did this phase accidentally mutate the production/demo ChromaDB directory
       (`rca-agent-system/data/chroma`)? Confirm the validation run used an isolated directory and
       run `just reset-demo` on the real one afterward regardless, to leave the repo in a clean
-      demo-ready state for Phase 6.
-- [ ] If the acceptance bar is **not** met after Phases 1–4, do not force it by re-tuning
+      demo-ready state for Phase 6. — All Phase 5 evaluate/reset/memory-evolution commands used
+      `CHROMA_PERSIST_DIR=./data/chroma-tier0-validation` explicitly; confirmed via directory
+      mtimes that `data/chroma` was untouched during the whole validation run, then deleted the
+      scratch directory and ran a real (unscoped) `scripts/reset_memory.py` once at the end so the
+      live dev DB now reflects the full 14-incident seed set for Phase 6 onward.
+- [x] If the acceptance bar is **not** met after Phases 1–4, do not force it by re-tuning
       constants until the number looks right on this one dataset (that's overfitting to 18
       incidents). Instead, document the shortfall honestly in the PR description, and decide
       explicitly whether to (a) iterate on Phases 1–4's design, or (b) ship what's improved so
       far with the remaining gap noted as follow-up — both are legitimate, silently fudging the
-      threshold is not.
+      threshold is not. — **Not applicable this time** — all four criteria passed without any
+      constant retuning; §4's formulas and defaults are unchanged from where Phases 1–4 left them.
 
 ---
 
