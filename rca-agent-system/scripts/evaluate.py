@@ -191,12 +191,77 @@ class ScenarioResult:
     # the scenario is OOD).
     retrieved_ids: list[str] = field(default_factory=list)
     expected_incident_rank: int | None = None
+    # --- Tier 0 diagnostics (How-To-Improve/TIER0_PLAN.md Phase 0) ---
+    # Populated from `record_reflection`'s `_debug` payload once Phase 1's
+    # deterministic delta gate lands; stays `None` (inert) until then.
+    reflection_positive_dropped_count: int | None = None
+    reflection_negative_dropped_count: int | None = None
+    # Populated once Phase 4's multi-sample ensembling lands; stays `None`
+    # (inert) until then.
+    reflection_ensemble_agreement: float | None = None
 
 
 # -------------------- pipeline runner --------------------
 # Lazy imports of the agent system so unit-test importing this module
 # doesn't pull in the whole ADK stack (which is slow and requires a
 # Gemini key).
+
+
+def _apply_reflection_diagnostics(
+    result: ScenarioResult, event: Any, stage_tokens: dict[str, int] | None = None
+) -> None:
+    """Populate the Tier 0 delta-gate + ensemble diagnostics on `result`
+    from a single ADK event, if it carries an `ensemble_reflect` (Phase
+    4) or legacy `record_reflection` tool response.
+
+    Reads the tool's own `_debug` payload directly off the function
+    response (not the LLM's echoed text) -- the reflection agent's
+    instruction only re-emits 4 of the tool's return keys, so `_debug`
+    never reaches `reflection_output` session state. Best-effort:
+    swallows malformed events rather than failing the eval over optional
+    diagnostics.
+
+    Phase 4's ensemble samples are raw `google.genai` calls made INSIDE
+    the tool, bypassing ADK's own Runner/event stream entirely -- their
+    token cost would otherwise never show up in `stage_tokens`/
+    `total_tokens` at all. When `stage_tokens` (the same per-author dict
+    `_run_pipeline_for_scenario` already builds) is passed in, the
+    ensemble's reported token total is folded into it (and into
+    `result.total_tokens`) under the "reflection_agent" stage, so the
+    Phase 4 "roughly 3x tokens on the reflection stage" checkpoint is
+    actually measurable instead of assumed.
+    """
+    try:
+        get_function_responses = event.get_function_responses
+    except AttributeError:
+        return
+    try:
+        for fr in get_function_responses():
+            # "record_reflection" is the pre-Phase-4 tool name, kept here
+            # so old ablation clones / experiments (if any linger) still
+            # populate diagnostics; "ensemble_reflect" is the current one.
+            if getattr(fr, "name", None) not in ("ensemble_reflect", "record_reflection"):
+                continue
+            debug = (getattr(fr, "response", None) or {}).get("_debug") or {}
+            if "positive_dropped_count" in debug:
+                result.reflection_positive_dropped_count = int(
+                    debug["positive_dropped_count"]
+                )
+            if "negative_dropped_count" in debug:
+                result.reflection_negative_dropped_count = int(
+                    debug["negative_dropped_count"]
+                )
+            if "ensemble_agreement" in debug:
+                result.reflection_ensemble_agreement = float(debug["ensemble_agreement"])
+            if "ensemble_total_tokens" in debug:
+                extra = int(debug["ensemble_total_tokens"])
+                result.total_tokens += extra
+                if stage_tokens is not None:
+                    stage_tokens["reflection_agent"] = (
+                        stage_tokens.get("reflection_agent", 0) + extra
+                    )
+    except Exception:
+        pass
 
 
 def _apply_retrieval_signals(
@@ -383,6 +448,8 @@ async def _run_pipeline_for_scenario(
                     final_output = v
             if "retrieval_output" in state_delta:
                 retrieval_payload = state_delta["retrieval_output"]
+
+            _apply_reflection_diagnostics(result, event, stage_tokens)
     except Exception as exc:
         result.error = f"{type(exc).__name__}: {exc}"
     finally:

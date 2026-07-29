@@ -29,8 +29,11 @@ download the ModernBERT weights (~300 MB).
 
 ```bash
 cd rca-agent-system
-# One-time setup (or after `git pull` that touched seed/incidents/):
-uv run python scripts/seed_knowledge_base.py
+# One-time setup (or after `git pull` that touched seed/incidents/, OR
+# after pulling a Tier 0 reflection/memory update -- the incident
+# metadata schema gained alpha/beta fields and old on-disk records
+# aren't backfilled, so a full reset is required, not just a re-seed):
+uv run python scripts/reset_memory.py
 
 # To enable the demo reset endpoint (recommended for live demos):
 ALLOW_DEMO_RESET=1 uv run python server.py

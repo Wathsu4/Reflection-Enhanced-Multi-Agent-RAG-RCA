@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from rca_system.memory.chroma_store import IncidentMemory, IncidentRecord
+from rca_system.memory.chroma_store import IncidentMemory
 from scripts import reset_memory as reset_module
 from scripts import seed_knowledge_base as seeder
 from tests._fake_embed import FakeEmbeddingFunction
@@ -63,14 +63,18 @@ def test_reset_removes_existing_dir_and_reseeds(
         embedding_function=FakeEmbeddingFunction(),
     )
     boosted_id = "redis-conn-refused-001"
+    # Tier 0 Phase 2: delta=0.5 is re-clamped to 0.2 (max), giving a 1.0
+    # pseudocount -> from the fresh seed prior (alpha=beta=2.0):
+    # alpha=3.0, beta=2.0 -> success_score = 2*3/(3+2) = 1.2 (not 1.5).
     mem.update_score(boosted_id, 0.5)
-    pre_reset = mem.query("anything", k=10)
-    pre_score = next(
-        h["metadata"]["success_score"]
-        for h in pre_reset
-        if h["incident_id"] == boosted_id
-    )
-    assert pre_score == pytest.approx(1.5)
+    # Direct by-id lookup, not a similarity `.query()` -- Tier 0 Phase 5
+    # grew the seed set past a fixed `k`, so a top-k similarity search
+    # over the fake (arbitrary, hash-based) embeddings can no longer be
+    # relied on to include every record, including this one.
+    pre_meta = mem._collection.get(  # noqa: SLF001 -- intentional internal check
+        ids=[boosted_id], include=["metadatas"]
+    )["metadatas"][0]
+    assert pre_meta["success_score"] == pytest.approx(1.2)
     del mem  # close any in-process handles before rmtree
 
     # Act: reset
@@ -86,11 +90,13 @@ def test_reset_removes_existing_dir_and_reseeds(
     expected_count = len(list(SHIPPED_SEED_DIR.glob("*.md")))
     assert fresh.count() == expected_count
 
-    post_reset = fresh.query("anything", k=10)
-    for hit in post_reset:
-        assert hit["metadata"]["success_score"] == pytest.approx(1.0), (
-            f"After reset, {hit['incident_id']} still has score "
-            f"{hit['metadata']['success_score']} (expected 1.0)"
+    # Full sweep via a direct (non-similarity) `.get()` so every seeded
+    # record is checked regardless of how large the seed set grows.
+    post_reset = fresh._collection.get(include=["metadatas"])  # noqa: SLF001
+    for incident_id, meta in zip(post_reset["ids"], post_reset["metadatas"]):
+        assert meta["success_score"] == pytest.approx(1.0), (
+            f"After reset, {incident_id} still has score "
+            f"{meta['success_score']} (expected 1.0)"
         )
 
 

@@ -116,18 +116,113 @@ def test_query_on_empty_collection_returns_empty(tmp_path: Path) -> None:
 # ---------- update_score ----------
 
 
-def test_update_score_clamps_to_range(tmp_path: Path) -> None:
-    mem = make_memory(tmp_path)
-    mem.add(make_record("clamp-001"))
-    # Push way over the upper bound -- must clamp at 2.0.
-    mem.update_score("clamp-001", delta=10.0)
-    hit = mem.query("anything", k=1)[0]
-    assert hit["metadata"]["success_score"] == pytest.approx(2.0)
+def _meta(mem: IncidentMemory, incident_id: str) -> dict:
+    """Direct by-id metadata lookup, bypassing similarity search -- used
+    where multiple records share an embedding (identical `to_document()`
+    text) and `query()`'s top-1 result would be ambiguous."""
+    res = mem._collection.get(ids=[incident_id], include=["metadatas"])  # noqa: SLF001
+    return dict(res["metadatas"][0])
 
-    # Push way below 0 -- must clamp at 0.0.
-    mem.update_score("clamp-001", delta=-99.0)
-    hit = mem.query("anything", k=1)[0]
-    assert hit["metadata"]["success_score"] == pytest.approx(0.0)
+
+def test_update_score_seeded_fresh_is_exactly_neutral(tmp_path: Path) -> None:
+    """Pins the "prior is neutral" invariant: a record constructed
+    without an explicit success_score derives it from alpha == beta ==
+    score_prior_strength, giving exactly 1.0 -- matching the pre-Phase-2
+    default."""
+    mem = make_memory(tmp_path)
+    record = make_record("fresh-001")
+    assert record.alpha == record.beta == 2.0  # default score_prior_strength
+    assert record.success_score == pytest.approx(1.0)
+    mem.add(record)
+    assert _meta(mem, "fresh-001")["success_score"] == pytest.approx(1.0)
+
+
+def test_update_score_single_extreme_call_moves_by_bounded_amount(
+    tmp_path: Path,
+) -> None:
+    """Tier 0 Phase 2: even a wildly out-of-range delta can't swing the
+    score straight to an extreme in one call -- it's re-clamped to
+    +-0.2, converted to at most a 1.0 pseudo-count, and applied against
+    the existing alpha/beta prior (default alpha=beta=2.0).
+
+      delta=10.0  -> clamped to  0.2 -> pseudocount=1.0 -> alpha=3, beta=2
+                  -> success_score = 2*3/(3+2) = 1.2 (NOT 2.0)
+      delta=-99.0 -> clamped to -0.2 -> pseudocount=1.0 -> alpha=2, beta=3
+                  -> success_score = 2*2/(2+3) = 0.8 (NOT 0.0)
+    """
+    mem = make_memory(tmp_path)
+    mem.add(make_record("clamp-high"))
+    mem.add(make_record("clamp-low"))
+
+    mem.update_score("clamp-high", delta=10.0)
+    assert _meta(mem, "clamp-high")["success_score"] == pytest.approx(1.2)
+    assert _meta(mem, "clamp-high")["alpha"] == pytest.approx(3.0)
+    assert _meta(mem, "clamp-high")["beta"] == pytest.approx(2.0)
+
+    mem.update_score("clamp-low", delta=-99.0)
+    assert _meta(mem, "clamp-low")["success_score"] == pytest.approx(0.8)
+    assert _meta(mem, "clamp-low")["alpha"] == pytest.approx(2.0)
+    assert _meta(mem, "clamp-low")["beta"] == pytest.approx(3.0)
+
+
+def test_update_score_repeated_extreme_calls_eventually_saturate(
+    tmp_path: Path,
+) -> None:
+    """The "runaway reputation" defense (docs/DEFENSE_GUIDE.md) still
+    holds under the pseudo-count model: sustained one-sided pressure
+    keeps pushing the score toward the bound, it just takes more calls
+    than a single one now. After N=50 max-magnitude positive calls from
+    the default prior (alpha=beta=2.0), each adding a full 1.0
+    pseudocount to alpha:
+        alpha = 2 + 50*1.0 = 52, beta = 2 (unchanged)
+        success_score = 2*52/(52+2) = 104/54 = 1.9259259...
+    -- much closer to 2.0 than a single call (1.2), strictly below it,
+    and monotonically non-decreasing at every step (never overshoots).
+    The negative direction is exactly symmetric.
+    """
+    mem = make_memory(tmp_path)
+    mem.add(make_record("saturate-high"))
+    mem.add(make_record("saturate-low"))
+
+    prev_high = 1.0
+    prev_low = 1.0
+    for _ in range(50):
+        mem.update_score("saturate-high", delta=10.0)
+        mem.update_score("saturate-low", delta=-99.0)
+        high = _meta(mem, "saturate-high")["success_score"]
+        low = _meta(mem, "saturate-low")["success_score"]
+        assert prev_high <= high < 2.0
+        assert 0.0 < low <= prev_low
+        prev_high, prev_low = high, low
+
+    assert _meta(mem, "saturate-high")["success_score"] == pytest.approx(104 / 54)
+    assert _meta(mem, "saturate-low")["success_score"] == pytest.approx(4 / 54)
+
+
+def test_update_score_handles_pre_phase2_metadata_missing_alpha_beta(
+    tmp_path: Path,
+) -> None:
+    """Migration adversarial case: a record written before Tier 0 Phase 2
+    (no `alpha`/`beta` in its stored metadata at all -- the documented
+    "not backfilled" scenario, TIER0_PLAN.md SS4). `update_score` must not
+    crash; it falls back to `settings.score_prior_strength` for the
+    missing fields, same as a fresh record."""
+    mem = make_memory(tmp_path)
+    mem.add(make_record("legacy-001"))
+    # Simulate stale on-disk metadata by stripping alpha/beta directly,
+    # bypassing IncidentRecord (which always includes them).
+    stale_meta = _meta(mem, "legacy-001")
+    del stale_meta["alpha"]
+    del stale_meta["beta"]
+    mem._collection.update(ids=["legacy-001"], metadatas=[stale_meta])  # noqa: SLF001
+
+    mem.update_score("legacy-001", delta=0.1)  # must not raise
+
+    meta = _meta(mem, "legacy-001")
+    # Falls back to the default prior (2.0/2.0) before applying the delta.
+    assert meta["alpha"] == pytest.approx(2.5)
+    assert meta["beta"] == pytest.approx(2.0)
+    assert meta["success_score"] == pytest.approx(10 / 9)
 
 
 def test_update_score_unknown_id_is_noop(tmp_path: Path) -> None:
@@ -149,6 +244,26 @@ def test_mark_retrieved_increments_usage_count(tmp_path: Path) -> None:
     hit = mem.query("anything", k=1)[0]
     assert hit["metadata"]["usage_count"] == 2
     assert hit["metadata"]["last_used_ts"] > 0
+
+
+def test_mark_retrieved_does_not_touch_alpha_beta(tmp_path: Path) -> None:
+    """`usage_count` (retrieval popularity) and `alpha`/`beta` (reflection
+    confidence) are independent counters -- retrieval must never bump
+    the score prior, and score updates must never bump usage_count."""
+    mem = make_memory(tmp_path)
+    mem.add(make_record("independent-001"))
+
+    mem.mark_retrieved(["independent-001"])
+    mem.mark_retrieved(["independent-001"])
+    meta = _meta(mem, "independent-001")
+    assert meta["usage_count"] == 2
+    assert meta["alpha"] == pytest.approx(2.0)
+    assert meta["beta"] == pytest.approx(2.0)
+
+    mem.update_score("independent-001", delta=0.2)
+    meta = _meta(mem, "independent-001")
+    assert meta["usage_count"] == 2  # unchanged by a score update
+    assert meta["alpha"] == pytest.approx(3.0)
 
 
 def test_mark_retrieved_empty_list_is_noop(tmp_path: Path) -> None:

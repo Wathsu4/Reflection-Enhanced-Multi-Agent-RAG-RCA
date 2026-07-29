@@ -45,6 +45,23 @@ class Settings(BaseSettings):
     # --- Model ---
     gemini_model: str = "gemini-2.5-flash"
 
+    # --- Tier 0: reflection/memory calibration (see How-To-Improve/TIER0_PLAN.md §4) ---
+    # At most this fraction of the *retrieved* set may receive a negative
+    # delta per reflection call (Phase 1 delta gating).
+    max_negative_delta_fraction: float = 0.4
+    # Initial alpha/beta pseudo-count prior for a fresh incident's score;
+    # higher = more resistant to early swings (Phase 2 score accumulation).
+    score_prior_strength: float = 2.0
+    # Divisor mapping a clamped delta to a pseudo-count -- 0.2 means a
+    # max-magnitude delta (+-0.2) equals a 1.0 pseudo-count (Phase 2).
+    delta_to_pseudocount_scale: float = 0.2
+    # Weight on the anti-starvation exploration term added to retrieval
+    # ranking, so a zero-scored incident can still resurface (Phase 3).
+    exploration_bonus_weight: float = 0.1
+    # Number of parallel reflection samples to aggregate. 1 reproduces the
+    # pre-Tier-0 single-shot behavior for cheap local iteration (Phase 4).
+    reflection_ensemble_size: int = 3
+
     @property
     def cors_origins_list(self) -> list[str]:
         """Comma-separated origins -> list, trimmed and de-empty'd."""

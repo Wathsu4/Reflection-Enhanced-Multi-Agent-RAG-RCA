@@ -9,7 +9,6 @@ unit-test coverage.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -197,3 +196,101 @@ def test_render_markdown_report_contains_required_sections() -> None:
     assert "# RCA pipeline evaluation" in md
     assert "## Per-scenario" in md
     assert "| a |" in md
+
+
+# ---------- _apply_reflection_diagnostics (Tier 0 Phase 1 / Phase 4) ----------
+
+
+class _FakeFunctionResponse:
+    def __init__(self, name: str, response: dict) -> None:
+        self.name = name
+        self.response = response
+
+
+class _FakeEvent:
+    def __init__(self, function_responses: list) -> None:
+        self._function_responses = function_responses
+
+    def get_function_responses(self) -> list:
+        return self._function_responses
+
+
+def test_apply_reflection_diagnostics_populates_from_debug_payload() -> None:
+    result = ev.ScenarioResult(id="s", expected_incident_id=None)
+    event = _FakeEvent(
+        [
+            _FakeFunctionResponse(
+                "ensemble_reflect",
+                {
+                    "_debug": {
+                        "positive_dropped_count": 2,
+                        "negative_dropped_count": 1,
+                        "ensemble_agreement": 0.667,
+                    }
+                },
+            )
+        ]
+    )
+    ev._apply_reflection_diagnostics(result, event)
+    assert result.reflection_positive_dropped_count == 2
+    assert result.reflection_negative_dropped_count == 1
+    assert result.reflection_ensemble_agreement == pytest.approx(0.667)
+
+
+def test_apply_reflection_diagnostics_folds_ensemble_tokens_into_stage_tokens() -> None:
+    """The ensemble's samples are raw google.genai calls bypassing ADK's
+    own event stream -- their token cost must be folded into
+    result.total_tokens and stage_tokens["reflection_agent"] so it's not
+    silently invisible to the cost-accounting the Phase 4 checkpoint
+    relies on."""
+    result = ev.ScenarioResult(id="s", expected_incident_id=None, total_tokens=500)
+    stage_tokens = {"reflection_agent": 200, "reasoning_agent": 300}
+    event = _FakeEvent(
+        [_FakeFunctionResponse("ensemble_reflect", {"_debug": {"ensemble_total_tokens": 9000}})]
+    )
+    ev._apply_reflection_diagnostics(result, event, stage_tokens)
+    assert result.total_tokens == 500 + 9000
+    assert stage_tokens["reflection_agent"] == 200 + 9000
+    assert stage_tokens["reasoning_agent"] == 300  # untouched
+
+
+def test_apply_reflection_diagnostics_still_recognises_legacy_tool_name() -> None:
+    """Pre-Phase-4 ablation clones (if any linger) called the tool
+    `record_reflection`; diagnostics must still populate from it."""
+    result = ev.ScenarioResult(id="s", expected_incident_id=None)
+    event = _FakeEvent(
+        [
+            _FakeFunctionResponse(
+                "record_reflection",
+                {"_debug": {"positive_dropped_count": 1, "negative_dropped_count": 0}},
+            )
+        ]
+    )
+    ev._apply_reflection_diagnostics(result, event)
+    assert result.reflection_positive_dropped_count == 1
+    assert result.reflection_negative_dropped_count == 0
+
+
+def test_apply_reflection_diagnostics_ignores_other_tool_responses() -> None:
+    result = ev.ScenarioResult(id="s", expected_incident_id=None)
+    event = _FakeEvent([_FakeFunctionResponse("retrieve_incidents", {"hits": []})])
+    ev._apply_reflection_diagnostics(result, event)
+    assert result.reflection_positive_dropped_count is None
+    assert result.reflection_negative_dropped_count is None
+
+
+def test_apply_reflection_diagnostics_handles_missing_debug_key() -> None:
+    result = ev.ScenarioResult(id="s", expected_incident_id=None)
+    event = _FakeEvent([_FakeFunctionResponse("ensemble_reflect", {"status": "recorded"})])
+    ev._apply_reflection_diagnostics(result, event)
+    assert result.reflection_positive_dropped_count is None
+    assert result.reflection_negative_dropped_count is None
+    assert result.reflection_ensemble_agreement is None
+
+
+def test_apply_reflection_diagnostics_handles_events_without_the_method() -> None:
+    """Events that don't expose `get_function_responses` at all (e.g. a
+    bare object) must not raise -- this is best-effort instrumentation."""
+    result = ev.ScenarioResult(id="s", expected_incident_id=None)
+    ev._apply_reflection_diagnostics(result, object())
+    assert result.reflection_positive_dropped_count is None

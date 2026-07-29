@@ -1,0 +1,967 @@
+# Tier 0 Implementation Plan — Fix the Reflection/Memory Mechanism
+
+Status: **ready to execute** (authored via actor-critique review, see §3 for the review log)
+Scope: `rca-agent-system/` only. One feature branch, one pull request, six implementation phases.
+Companion doc: this plan operationalizes items 0.1–0.5 from the improvement-list conversation
+(the reflection-driven memory re-ranking is the thesis's core novelty claim per
+`thesis/Chapter_2_Literature_Review.md` §2.9.2 gap G3/G4, and `docs/RESEARCH_QUESTIONS.md` RQ3/RO2).
+
+---
+
+## 1. Why this tier exists (evidence, not opinion)
+
+From `rca-agent-system/eval/experiments/SUMMARY-ablation-matrix.md` (reproduced 2026-07-27):
+
+| Variant | Keyword acc | Retrieval MRR | nDCG@5 | Mean latency |
+|---|---|---|---|---|
+| **Full system (`none`)** | 0.933 | **0.836** | **0.876** | 28.3s |
+| **Memory FROZEN** (reflection runs, scores never persisted) | **1.0** | **1.0** | **1.0** | 29.6s |
+
+Turning the score-persistence *off* currently beats leaving it *on*. The memory-evolution
+experiment explains the mechanism: with 6 seed incidents and `k=5` retrieval, ~83% of the
+catalog is touched by every single query. `reflection_agent`'s instruction says "0.0 if
+retrieved but neutral," but Gemini does not reliably default to neutral — in practice most
+retrieved-but-uncited incidents get a small negative nudge. Since each incident gets far more
+"uncited" exposures than "genuinely used" ones, this is a textbook **Matthew effect**
+(rich-get-richer / poor-get-poorer, well documented in the bandit/recommender-systems
+literature) and it fully explains the observed pattern: 5 of 6 incidents got demoted (one hit
+the floor of 0.0) and only the most lexically distinctive incident (Redis) trended up.
+
+This is fixable. It is not evidence that the underlying idea (reflection-biased retrieval) is
+wrong — it's evidence that the *current calibration* of the reflection→score pipeline is
+mis-tuned. Tier 0 fixes the calibration and proves it with the same ablation harness that
+found the problem.
+
+---
+
+## 2. Execution protocol — read this before starting Phase 0
+
+**Branching & PR:** Create exactly one branch (e.g. `tier0-reflection-memory-fix`). Commit once
+per phase (a clean, test-passing commit is the rollback unit — `git revert` a phase if it turns
+out to be wrong). **Do not open a pull request until Phase 6 is completely finished.** All six
+phases land in a single PR against `main`/`master`.
+
+**The actor-critique loop (run this for every phase, no exceptions):**
+
+1. **ACTOR** — implement exactly what the phase section specifies. If you must deviate, write
+   down why in the phase's checklist before continuing.
+2. **ACTOR** — run the phase's new/updated tests, then the full test suite for the affected
+   sub-project (`cd rca-agent-system && uv run pytest -q`).
+3. **CRITIC** — re-read your own diff adversarially against that phase's "Critique checklist."
+   Do not skim it. Assume there is a bug and go looking for it.
+4. **CRITIC** — construct at least one adversarial case not already in the plan's test list
+   (empty retrieval, all-negative deltas, unknown incident id, k larger than the KB, a
+   reflection call with zero retrieved incidents, etc.) and verify it's handled.
+5. If CRITIC finds *anything*, go back to step 1. Repeat until CRITIC has nothing left to flag.
+6. Only then: commit, check off the phase's boxes in this file, move to the next phase.
+
+Do not batch phases together "to save time." The point of phase boundaries is that each one is
+independently revertable and independently defensible in front of an examiner.
+
+**Cost/time awareness:** Phases 0–3 are pure unit-testable Python (no Gemini key required for
+the test suite itself). Phases 1's prompt-compliance check, Phase 4, and Phase 5 require live
+Gemini calls and will consume real API quota — use `--limit 2` or `--limit 3` smoke runs while
+iterating, and reserve full-matrix runs for the checkpoint at the end of each phase. Phase 5
+alone (7 ablation variants × ~18 scenarios) is roughly 30–60+ minutes of live calls; do not run
+it repeatedly out of habit.
+
+---
+
+## 3. Plan authoring log (actor-critique applied to this document)
+
+This plan was drafted, then critiqued, then revised, across two rounds before being accepted.
+Recorded here so the rationale for non-obvious decisions isn't lost.
+
+**Round 1 findings → fixes applied:**
+- *"Omit vs. zero" is unenforceable by prompt alone.* Gemini cannot be trusted to reliably omit
+  a JSON key just because the instruction says so. Fix: the gating logic moved from "hope the
+  agent omits it" to a **deterministic, code-enforced gate** inside `record_reflection` — see
+  Phase 1.
+- *No way to tell "genuinely irrelevant" from "merely not the top pick."* Positive deltas can be
+  checked objectively (was the id in `used_incident_ids`?); negative deltas cannot, since
+  "misleading" is a judgment call. Fix: split the two — positive deltas are gated
+  deterministically, negative deltas are capped in *count* (at most
+  `max_negative_delta_fraction` of the retrieved set) rather than trusted unconditionally.
+- *Phase 5 as originally scoped (50–200 new incidents) would blow up this PR.* That's a
+  separate, larger effort. Fix: descoped to a bounded 2–3× expansion (6 → ~12–18 incidents),
+  enough to meaningfully drop the k/N exposure ratio, with full-scale stress testing explicitly
+  deferred (§9).
+- *Schema change breaks existing on-disk ChromaDB state silently.* Fix: treated as a documented
+  breaking change requiring `just reset-demo` post-upgrade (rejected building migration/backfill
+  logic for a research prototype's fully-regenerable vector index — not worth the complexity).
+
+**Round 2 findings → fixes applied:**
+- *No incremental checkpoint between phases* meant a regression introduced in Phase 2 might not
+  surface until Phase 5's full matrix run, days later. Fix: each phase gets a cheap
+  `none` vs `memory_frozen` (or scenario-limited) checkpoint, not just a final one.
+- *Ensembling (0.4) as originally imagined risked restructuring the ADK `SequentialAgent` graph*
+  (e.g. via a `LoopAgent`), which would invalidate `tests/test_pipeline.py`'s composition
+  assertions and the state-key contract documented in `rca_system/agent.py`. Fix: Phase 4's
+  primary design keeps the 4-agent flat structure intact and ensembles *inside* the single
+  `reflection_agent` slot, mirroring the 3-sample majority-vote pattern `scripts/evaluate.py
+  --llm-judge` already uses elsewhere in this codebase. The graph-restructuring approach is kept
+  as a documented fallback only.
+- *`IncidentMemory.update_score`'s existing single-call saturation test would silently start
+  failing* once Phase 2 changes the internals from "add-then-clamp" to "bounded pseudo-count."
+  This is an intentional behavior change (no single call should swing a score straight to an
+  extreme), not a bug — but it must be called out and the test rewritten, not just left broken
+  or deleted. Fixed explicitly in Phase 2's checklist.
+- *Exploration bonus could reintroduce nondeterminism into a currently-deterministic-order test*
+  (`test_dynamic_reranking_boosts_high_score_hits`). Fix: bonus formula depends only on
+  `usage_count`, which is identical (zero) for both records in that test, so tie-breaking by
+  score is preserved — made explicit as a required non-regression check in Phase 3.
+
+**Round 3:** no further blocking issues found. Plan accepted.
+
+---
+
+## 4. Design spec — single source of truth for formulas & config
+
+New settings in `rca_system/settings.py` (`Settings` class), all overridable via
+`rca-agent-system/.env`:
+
+| Setting | Default | Used by | Meaning |
+|---|---|---|---|
+| `max_negative_delta_fraction` | `0.4` | Phase 1 | At most this fraction of the *retrieved* set may receive a negative delta per reflection call. |
+| `score_prior_strength` | `2.0` | Phase 2 | Initial `alpha`/`beta` pseudo-count prior (higher = more resistant to early swings). |
+| `delta_to_pseudocount_scale` | `0.2` | Phase 2 | Divisor mapping a clamped delta to a pseudo-count (`0.2` ⇒ a max-magnitude delta = 1.0 pseudo-count). |
+| `exploration_bonus_weight` | `0.1` | Phase 3 | Weight on the anti-starvation exploration term. |
+| `reflection_ensemble_size` | `3` | Phase 4 | Number of parallel reflection samples to aggregate. Set to `1` to reproduce today's single-shot behavior for cheap iteration. |
+
+**Phase 1 — delta gating (exact rule):**
+- `record_reflection` gains two new required params: `used_incident_ids: list[str]` and
+  `retrieved_incident_ids: list[str]` (both already available to `reflection_agent` via
+  `{reasoning_output?}` and `{retrieval_output?}`).
+- Any **positive** delta for an id not in `used_incident_ids` → dropped (not zeroed — removed
+  from the returned dict entirely).
+- **Negative** deltas: allowed up to `ceil(len(retrieved_incident_ids) * max_negative_delta_fraction)`
+  entries. If more are proposed, keep the largest-magnitude ones up to that count; drop the rest.
+- Entries with delta exactly `0.0` are dropped unconditionally (a "no-op" delta carries no
+  information and should never reach `apply_reflection_to_memory`).
+- Everything else (clamping to ±0.2, non-numeric handling, list-of-objects reshaping) keeps its
+  current behavior from `record_reflection.py` — this phase only adds the gate, it doesn't
+  remove existing robustness.
+
+**Phase 2 — confidence-weighted score (exact formula):**
+- `IncidentRecord` gains `alpha: float = score_prior_strength` and
+  `beta: float = score_prior_strength`.
+- Derived `success_score = 2 * alpha / (alpha + beta)` — at the default prior (2.0/2.0) this is
+  exactly `1.0`, matching today's neutral starting value.
+- `IncidentMemory.update_score(incident_id, delta)`: first re-clamp `delta` to `[-0.2, 0.2]`
+  (defense-in-depth, independent of the tool-level clamp — preserves the existing
+  "no single call can be catastrophic" property, just at the pseudo-count layer instead of the
+  raw-score layer). Compute `pseudocount = abs(clamped_delta) / delta_to_pseudocount_scale`
+  (max `1.0`). Add `pseudocount` to `alpha` if `delta > 0`, to `beta` if `delta < 0`. Recompute
+  and persist `success_score`, `alpha`, `beta` together.
+- `success_score` stays a stored metadata field (not computed lazily at read time), so
+  `retrieve_incidents.py`'s ranking code needs **zero changes** — it keeps reading
+  `metadata["success_score"]` exactly as today.
+- Migration: this changes the metadata schema. **Decision: do not backfill.** Document in the PR
+  and in `AGENTS.md`/`README.md` that `just reset-demo` (or a fresh `uv run python
+  scripts/seed_knowledge_base.py` into a clean dir) must be run once after deploying Tier 0. This
+  is consistent with how the project already treats memory as regenerable, disposable state.
+
+**Phase 3 — exploration bonus (exact formula):**
+- New ranking key in `retrieve_incidents.py`:
+  `similarity * success_score + exploration_bonus_weight * sqrt(1 / (1 + usage_count))`
+  (additive, not multiplicative — a `success_score` of exactly `0.0` still leaves the bonus term
+  intact, which is the whole point: a starved incident can still resurface).
+- At `usage_count=0` the bonus is `exploration_bonus_weight` (default `0.1`); it decays toward
+  `0` as an incident accumulates retrievals. It never dominates a genuinely strong match
+  (`similarity * success_score` ranges up to `2.0`; the bonus is capped at `0.1` by default).
+
+**Phase 4 — ensembling (exact aggregation rule):**
+- Preferred implementation: a custom aggregation layer invoked from within the single
+  `reflection_agent` pipeline slot, issuing `reflection_ensemble_size` concurrent Gemini calls
+  (via `asyncio.gather`, so wall-clock latency does not scale with the ensemble size — only
+  token cost does) and aggregating before the one `record_reflection` call.
+- Per-incident delta aggregation: **mean** across samples that proposed *any* delta for that id
+  (post Phase-1 gating, per sample); an id proposed by zero samples gets no entry.
+- `overall_quality` aggregation: majority vote across the 3 samples; ties broken toward the more
+  conservative label (`low` > `medium` > `high` in a tie).
+- Fallback (only if the primary approach proves infeasible against this ADK version): wrap
+  `reflection_agent` in an ADK `LoopAgent` fixed at `reflection_ensemble_size` iterations plus a
+  small deterministic aggregator sub-agent. This changes `root_agent`'s sub-agent shape and
+  **requires** updating `tests/test_pipeline.py` and re-checking every place that assumes
+  exactly 4 named sub-agents (`AGENTS.md` §6, `rca_system/ablations.py`'s clone logic). Prefer
+  the primary approach; only fall back here with an explicit note in the PR description of why.
+
+---
+
+## 5. Phase 0 — Baseline, safety net, instrumentation
+
+**Goal:** capture a trustworthy "before" snapshot and add the config surface later phases need,
+with zero behavior change.
+
+**Changes:**
+- [x] Add the five settings from §4 to `rca_system/settings.py` with the defaults listed (adding
+      them now, unused, keeps every later phase a smaller diff).
+- [x] Re-run and archive a fresh baseline: `just reset-demo`, then
+      `uv run python scripts/evaluate.py --ablation none` and
+      `uv run python scripts/evaluate.py --ablation memory_frozen` (write outputs to
+      `eval/experiments/`, they're timestamped automatically — do not overwrite the existing
+      2026-05-29 matrix, it stays as historical record). Also run
+      `uv run python scripts/evaluate_memory_evolution.py`.
+- [x] Add optional, currently-unpopulated diagnostic fields to `ScenarioResult` in
+      `scripts/evaluate.py`: `reflection_positive_dropped_count`,
+      `reflection_negative_dropped_count`, `reflection_ensemble_agreement` (default `None`/`0`).
+      These stay inert until Phases 1 and 4 populate them — added now so those phases' diffs are
+      additive, not "add field + add test + wire it up" all at once.
+- [x] No production code path changes behavior in this phase.
+
+**Baseline results (recorded 2026-07-27):**
+- `none` (full system): reused the same-day pre-existing run at
+  `eval/results-20260727-222918.{json,md}` (generated before any Tier 0 code changes, on the same
+  commit this branch was cut from — no need to re-spend quota reproducing it). Keyword accuracy
+  (E+P) **1.0** (11 exact / 4 partial / 0 miss), retrieval **MRR 0.792**, **nDCG@5 0.844**, mean
+  latency 23.88s. Memory-evolution (same reused artifact,
+  `eval/memory-evolution-20260727-224016.md`): 5/6 incidents demoted after 2 runs, one
+  (`db-deadlock-001`) hit the floor of `0.000`, only `redis-conn-refused-001` trended up (1.200) —
+  matches the Matthew-effect narrative in §1 exactly.
+- `memory_frozen`: freshly captured this session at
+  `eval/experiments/results-memory_frozen-20260727-235419.{json,md}`. Keyword accuracy (E+P)
+  **1.0** (10 exact / 5 partial / 0 miss), retrieval **MRR 1.0**, **nDCG@5 1.0**, mean latency
+  22.08s.
+- Gap being fixed by Tier 0: `none` vs `memory_frozen` MRR gap is **0.208** (0.792 vs 1.0) and
+  nDCG@5 gap is **0.156** (0.844 vs 1.0). (§1's originally-quoted 0.836/0.876 for `none` came from
+  a different sampling of the same non-deterministic pipeline — Gemini's retrieval-query wording
+  varies run to run, so a few points of MRR/nDCG drift between two "clean" `none` runs is expected
+  noise, not a regression. The underlying finding — freezing persistence beats leaving it on — is
+  reproduced clearly either way.)
+
+**Tests:** none new. Full existing suite (`uv run pytest -q`) must pass unchanged — this phase
+*is* the regression baseline. Confirmed: **128 passed**, 0 failed, before and after this phase's
+changes.
+
+**Checkpoint:** N/A (this phase produces the checkpoint baseline for every later phase to diff
+against).
+
+**Critique checklist:**
+- [x] Did any of the new settings accidentally get a default that changes existing behavior
+      (e.g. if some code path already reads a same-named field)? Grep for each new setting name
+      before adding it. — Grepped all five names across `rca-agent-system/` before adding; zero
+      pre-existing references. Full suite still 128/128 after the change.
+- [x] Does the freshly-captured baseline match (roughly) the numbers quoted in §1? If it's wildly
+      different, find out why before proceeding — you may be measuring a different starting
+      state (e.g. leftover drift from a prior manual session). — Keyword accuracy matches exactly
+      (1.0 exact-or-partial for both `none` and `memory_frozen`, same as §1). MRR/nDCG for `none`
+      (0.792/0.844 vs §1's 0.836/0.876) differ by ~0.03-0.04 — attributed to normal run-to-run
+      retrieval-query wording noise (Gemini re-generates the search query every run), not a
+      different starting state; `memory_frozen` reproduced §1's 1.0/1.0/1.0 exactly. Not wild —
+      proceeding.
+- [x] Confirm `eval/results-*.md` (the demo-ready location) is untouched — baseline captures
+      must go through `--ablation` flags so they land in `eval/experiments/`, not `eval/`. —
+      Clarification: `scripts/evaluate.py` routes `--ablation none` to `eval/` by design (it's the
+      demo-ready "full system" report location; see its `amain()`: `if ablation == "none": out_dir
+      = EVAL_DIR`) and every other ablation to `eval/experiments/`. That's existing, intentional,
+      tested behavior (matches every prior `none` run already committed in `eval/`) — not a Tier 0
+      change, and not something this phase alters. The `memory_frozen` baseline correctly landed
+      in `eval/experiments/`. No unintended writes to `eval/results-*.md` occurred this session.
+
+---
+
+## 6. Phase 1 — Deterministic delta gating (fixes item 0.1)
+
+**Goal:** stop the systematic negative-drift bias by making the "was this actually used"
+question a code-enforced gate instead of a prompt-compliance hope.
+
+**Changes:**
+- [x] `rca_system/tools/record_reflection.py`: extend `record_reflection` signature to
+      `(incident_score_deltas, overall_quality, rationale, used_incident_ids=None,
+      retrieved_incident_ids=None)`. Implement the exact gating rule from §4. Keep both new
+      params optional with safe defaults (`None` → treat as "gate nothing" / "cap nothing") so
+      **direct unit tests of the old 3-arg call shape don't all need to change at once** — but
+      note in the docstring that the pipeline always supplies both from here on.
+- [x] `rca_system/agents/reflection_agent.py`: update the instruction to (a) explain the new
+      tool params and instruct the agent to pass `used_incident_ids` from
+      `{reasoning_output?}` and `retrieved_incident_ids` from the ids present in
+      `{retrieval_output?}`, and (b) strengthen the neutral-scoring language (explicit "if in
+      doubt, omit it" framing, and require the `rationale` to name any incident it assigns a
+      negative delta to).
+- [x] `scripts/evaluate.py`: populate the two new diagnostic counters added in Phase 0 from the
+      gate's before/after counts (requires `record_reflection`, or a thin wrapper around it, to
+      report what it dropped — return an extra `_debug` key is acceptable here since it's
+      evaluation-only consumption; the production pipeline ignores it).
+
+**Deviation (found and fixed, not in the original plan):** the naive `FunctionTool(func=record_reflection)`
+registration broke the *live* pipeline outright — `google-adk==1.32.0` on Python 3.14 has a bug
+(matches [google/adk-python#5364](https://github.com/google/adk-python/issues/5364)) where any
+`Optional[list[str]]`/`list[str] | None` parameter forces the tool's *entire* schema through a
+`pydantic.TypeAdapter(...).json_schema()` fallback that emits a snake_case `additional_properties`
+key instead of the API's `additionalProperties`. `gemini-2.5-flash` 400s on the unrecognized field
+("Unknown name \"additional_properties\" ... Cannot find field") — confirmed via a `--limit 3`
+smoke run that failed 3/3 with that exact `ClientError` once `used_incident_ids`/
+`retrieved_incident_ids` were added. The fallback is contagious: it also corrupted the
+already-shipping `incident_score_deltas: dict[str, float]` parameter's schema, which had been
+fine for months. Root-caused offline (no API calls) by diffing `FunctionTool()._get_declaration()`
+output across signature variants — confirmed the trigger is specifically a default value that
+fails ADK's `isinstance(default, annotation)` compatibility check (`None` is never an instance of
+`list`), which is true for `Optional[...]`/`X | None` regardless of `typing.Optional` vs PEP 604
+spelling (Python 3.14 unifies both under `types.UnionType`, so there is no "cleaner" spelling that
+dodges it on this Python version). Fix: added `_RecordReflectionTool(FunctionTool)` in
+`reflection_agent.py`, overriding `_get_declaration()` with a hand-built, bug-free schema
+(`used_incident_ids`/`retrieved_incident_ids` as plain required `ARRAY` of `STRING`, matching what
+the updated instruction already guarantees Gemini will supply); `record_reflection`'s real Python
+signature — and thus every test above and the back-compat contract — is untouched. Added
+`test_record_reflection_tool_schema_has_no_additional_properties_or_any_of` in
+`tests/test_pipeline.py` as a regression pin. This is a required fix to make Phase 1 function at
+all on this stack, not scope creep; noting it here per the plan's own "write down why" rule.
+
+**Tests (`tests/test_record_reflection.py`):**
+- [x] Positive delta for an id **not** in `used_incident_ids` → dropped.
+- [x] Positive delta for an id **in** `used_incident_ids` → kept, value unchanged (post-clamp).
+- [x] Negative deltas within the cap (`≤ ceil(N_retrieved * 0.4)`) → all kept.
+- [x] Negative deltas exceeding the cap → only the largest-magnitude ones up to the cap survive;
+      verify which ones are dropped, not just the count.
+- [x] A delta of exactly `0.0` → dropped regardless of `used_incident_ids`.
+- [x] `used_incident_ids=None` / `retrieved_incident_ids=None` (back-compat call shape) →
+      behaves exactly like the pre-Phase-1 tool (no gating applied) — this is the explicit
+      backward-compatibility contract, write a test that pins it.
+- [x] Existing tests (`test_clamps_deltas_to_plus_minus_zero_point_two`,
+      `test_skips_non_numeric_delta_values`, `test_accepts_list_of_objects_format`, etc.) must
+      still pass — update their call sites to pass explicit `used_incident_ids`/
+      `retrieved_incident_ids` only where the test's intent requires it; otherwise leave them
+      relying on the `None` back-compat path. (None needed changes — all pass unmodified via the
+      back-compat path.)
+- Plus two adversarial cases found during the critique loop, not in the original list:
+  `test_positive_gate_disabled_but_retrieved_universe_filter_still_applies` (the two gates are
+  independent, not paired) and the ADK schema regression test noted above.
+
+**Checkpoint (live Gemini, small) — results recorded 2026-07-28:**
+- [x] Ran `uv run python scripts/evaluate.py --ablation none --limit 3` and read the raw
+      `record_reflection` tool call/response pairs from `raw_events` in the JSON. Confirmed Gemini
+      reliably supplies non-empty, accurate `used_incident_ids` (e.g. scenario `redis-2`: reasoning
+      cited only `redis-conn-refused-001`, reflection proposed one matching positive delta plus
+      *four* negative deltas for every other retrieved incident — the exact Matthew-effect pattern
+      from §1 — and the gate correctly kept the 2 highest-magnitude negatives (`disk-full-log-001`,
+      `upstream-timeout-payments-001`) and dropped the other 2
+      (`tls-cert-expired-001`, `db-deadlock-001`), matching `_debug: {positive_dropped_count: 0,
+      negative_dropped_count: 2}`). No prompt-compliance concern found; reasoning_agent's
+      `used_incident_ids` emission is already reliable enough for the gate to do real work.
+- [x] Ran the full 15-scenario dataset for both variants (fresh reset before each):
+      **`none`**: keyword acc (E+P) **1.0** (11 exact/4 partial/0 miss), retrieval **MRR 1.0**,
+      **nDCG@5 1.0**, mean latency 24.04s (`eval/results-20260728-065329.{json,md}`).
+      **`memory_frozen`**: keyword acc (E+P) **1.0** (11 exact/4 partial/0 miss), retrieval
+      **MRR 1.0**, **nDCG@5 1.0**, mean latency 25.22s
+      (`eval/experiments/results-memory_frozen-20260728-065957.{json,md}`).
+      **Gap vs Phase 0:** MRR gap closed from **0.208 → 0.0**, nDCG@5 gap closed from
+      **0.156 → 0.0** — the two variants are now indistinguishable on this metric on the current
+      6-incident KB. (Phase 5's expanded KB is the real stress test for whether this holds once
+      k=5 no longer covers ~83% of the catalog; flagging here that Phase 1 alone already closes
+      the gap at the *current* KB size, which is a strong but not yet fully generalized result.)
+
+**Critique checklist:**
+- [x] Does the gate correctly handle `retrieved_incident_ids` being **shorter** than
+      `incident_score_deltas` (reflection hallucinated an id that wasn't even retrieved)? Decide
+      and test explicitly: such an id should be dropped (it can't be verified against either
+      list meaningfully) — write the test. — `test_id_not_in_retrieved_incident_ids_is_dropped`.
+- [x] Does the fraction-based negative cap round sensibly at small N (e.g. `N_retrieved=1`:
+      `ceil(1*0.4)=1`, so a single retrieved-and-irrelevant incident can still be penalized —
+      confirm this is the intended behavior, not an off-by-one that zeroes out all negative
+      signal when only 1–2 incidents are retrieved). — `test_negative_cap_rounds_up_for_small_retrieved_sets`
+      confirms 1 negative delta survives at N=1; matches design intent.
+- [x] Confirm `apply_reflection_to_memory` and `IncidentMemory.update_score` were **not**
+      touched in this phase — Phase 1 only changes what makes it into the dict, not how the dict
+      is applied. If you find yourself editing `update_memory.py`, stop — that's Phase 2's job. —
+      `git diff --stat` confirms zero changes to either file.
+- [x] Re-run the full `rca-agent-system` test suite, not just `test_record_reflection.py` —
+      `test_pipeline.py` and `test_agent_loads.py` touch the reflection agent's instruction
+      string; confirm nothing asserts on the old instruction text verbatim. — Full suite green
+      (145 passed); grepped tests/ for old instruction substrings ("skeptical senior engineer",
+      "hand-waving", "neutral evidence") — no verbatim-text assertions found anywhere.
+
+---
+
+## 7. Phase 2 — Confidence-weighted score accumulation (fixes item 0.2)
+
+**Goal:** make the score a stable running signal (stickier with more evidence) instead of an
+unbounded random walk, independent of Phase 1's acute fix.
+
+**Changes:**
+- [x] `rca_system/memory/chroma_store.py`: add `alpha`/`beta` fields to `IncidentRecord`
+      (defaults from `settings.score_prior_strength`). Rewrite `update_score` per the §4 formula.
+      Keep the public signature `update_score(incident_id, delta)` unchanged — callers
+      (`update_memory.py`) need no changes.
+- [x] `rca_system/tools/update_memory.py`: no logic changes expected (it already just calls
+      `memory.update_score` and re-reads `success_score` before/after) — verify this is actually
+      true once Phase 2 lands, don't assume it. — Confirmed via `git diff --stat`: zero changes.
+- [x] Update `README.md` / `AGENTS.md` (§4 env var table, §6 tool description) and
+      `docs/DEMO.md` to note the schema change and the required `just reset-demo` after
+      upgrading. — Scoped narrowly for this phase (the comprehensive §4/§6 rewrite covering all
+      5 settings + the gating/pseudo-count nuance is Phase 6's job, so those tables still read
+      "old" until then, on purpose): added a dated Living Notes entry to `AGENTS.md` §13
+      documenting the breaking schema change and the no-backfill decision, and changed
+      `docs/DEMO.md`'s one-time-setup step from a plain re-seed to `scripts/reset_memory.py` with
+      an inline note about why a full reset (not just a re-seed) is required after this change.
+
+**Tests — this phase *requires* rewriting, not just re-running:**
+- [x] `tests/test_update_memory.py::test_returns_old_new_delta_per_id` and
+      `test_persists_new_score_to_memory`: recompute expected values from the new formula (not
+      simple addition) — show your arithmetic in a test comment so a reviewer can check it by
+      hand.
+- [x] `tests/test_update_memory.py::test_repeated_positive_deltas_clamp_at_2` /
+      `test_repeated_negative_deltas_clamp_at_0`: these currently expect saturation in 2–3 calls
+      at the old linear-add rate; recompute how many calls it now takes under the pseudo-count
+      model and update the loop count and expected value accordingly. Do not just increase the
+      loop count until the old assertion happens to pass again without understanding why —
+      derive the expected `alpha`/`beta`/`success_score` explicitly. — Renamed to
+      `test_repeated_positive_deltas_approach_but_never_reach_2` /
+      `..._negative_..._never_reach_0`; 100 repeated max-magnitude calls from a fresh prior derive
+      to exactly `51/26 ≈ 1.9615` / `1/26 ≈ 0.0385` respectively (shown in the test docstring).
+- [x] `tests/test_chroma_store.py::test_update_score_clamps_to_range`: this test currently
+      expects **one call** with `delta=10.0` to saturate at `2.0`. Under Phase 2 this is no
+      longer true by design (re-clamped to `0.2` → `1.0` pseudo-count → from the default prior
+      `alpha=2,beta=2`, one call yields `alpha=3,beta=2` → `success_score=1.2`, *not* `2.0`).
+      Rewrite this test to assert (a) a single extreme call moves the score by a bounded amount
+      matching the formula, and (b) **repeated** extreme calls eventually saturate at the bound —
+      add a new test for each. Do not delete the "eventually saturates" guarantee, it's load
+      bearing for the "runaway reputation" defense described in `docs/DEFENSE_GUIDE.md`. — Split
+      into `test_update_score_single_extreme_call_moves_by_bounded_amount` and
+      `test_update_score_repeated_extreme_calls_eventually_saturate` (N=50, asserts monotonic
+      non-decrease/non-increase at every step plus the exact final value, never overshooting).
+- [x] New test: an incident seeded fresh (`alpha=beta=score_prior_strength`) has
+      `success_score == 1.0` exactly — pins the "prior is neutral" invariant. —
+      `test_update_score_seeded_fresh_is_exactly_neutral`.
+- [x] New test: `test_seed_knowledge_base.py` and `test_reset_memory.py` still produce
+      `success_score == 1.0` for every seeded record (should pass unchanged since
+      `build_record()` doesn't set `alpha`/`beta` explicitly and the dataclass defaults handle
+      it — verify this rather than assuming it). — Added
+      `test_seeder_produces_neutral_success_score`; `test_reset_memory.py`'s existing post-reset
+      loop already asserted this and needed no change (only the *pre*-reset mutation's expected
+      value needed recomputing, see the deviation note below).
+- Plus two adversarial cases found during the critique loop, not in the original list:
+  `test_mark_retrieved_does_not_touch_alpha_beta` (independence check) and
+  `test_update_score_handles_pre_phase2_metadata_missing_alpha_beta` (the actual no-backfill
+  migration scenario: a record whose stored metadata has no `alpha`/`beta` at all).
+
+**Deviation (found during implementation, not in the original plan):**
+`tests/test_reset_memory.py::test_reset_removes_existing_dir_and_reseeds` also broke — it wasn't
+in the plan's explicit list (only `test_update_memory.py`/`test_chroma_store.py` were called out)
+but it primes a score via `mem.update_score(boosted_id, 0.5)` and asserted the old linear-add
+result (`1.5`). Recomputed: `delta=0.5` is re-clamped to `0.2`, giving pseudocount `1.0` ->
+`alpha=3.0, beta=2.0` -> `1.2`. Fixed with the same derive-don't-guess approach as the plan's
+other test rewrites.
+
+**Checkpoint (live Gemini) — results recorded 2026-07-28:**
+- [x] Ran `evaluate_memory_evolution.py --runs 3` on the existing dataset (fresh reset first).
+      Full per-incident table (`eval/memory-evolution-20260728-073009.md`):
+
+      | incident_id | baseline | after run 1 | after run 2 | after run 3 |
+      |---|---|---|---|---|
+      | `db-deadlock-001` | 1.000 | 1.333 | 1.500 | 1.524 |
+      | `disk-full-log-001` | 1.000 | 1.231 | 1.375 | 1.500 |
+      | `jvm-oom-heap-001` | 1.000 | 1.304 | 1.484 | 1.442 |
+      | `redis-conn-refused-001` | 1.000 | 1.304 | 1.273 | 1.333 |
+      | `tls-cert-expired-001` | 1.000 | 1.333 | 1.412 | 1.429 |
+      | `upstream-timeout-payments-001` | 1.000 | 1.304 | 1.375 | 1.364 |
+
+      **Drift summary:** 6/6 incidents boosted, 0 demoted, 0 unchanged — a complete reversal of
+      the Phase 0 baseline (5/6 demoted, one at the `0.0` floor). Per-run increments visibly
+      shrink (e.g. `db-deadlock-001`: +0.333 → +0.167 → +0.024), consistent with the
+      confidence-weighting design intent, and **no incident hit the `0.0`/`2.0` clamp** across 3
+      runs. Combined with Phase 1's gate (which is why every incident trends *up* now instead of
+      down — genuinely-cited incidents get clean positive credit and stray negatives are capped),
+      this is a strong joint result. Not yet a full generalization test (still the 6-incident KB;
+      that's Phase 5).
+
+**Critique checklist:**
+- [x] Confirm the re-clamp inside `update_score` uses the **same** bound constant as
+      `record_reflection`'s `_DELTA_MIN`/`_DELTA_MAX` (import/share it — do not duplicate the
+      literal `0.2` in two files where it can silently drift out of sync). — Imported directly
+      (`from rca_system.tools.record_reflection import _DELTA_MAX, _DELTA_MIN`); no duplicated
+      literal.
+- [x] Confirm `retrieve_incidents.py` was **not** touched in this phase (it should keep reading
+      `metadata["success_score"]` unchanged — if you found yourself editing it, that's a sign
+      the derived-field caching isn't working and needs to be fixed here, not deferred). —
+      `git diff --stat` confirms zero changes.
+- [x] Check the migration story is actually documented somewhere a future reader will see it
+      (`AGENTS.md` env var table is the most likely place someone checks) — not just mentioned in
+      a commit message. — Added to `AGENTS.md` §13 Living Notes (dated) plus `docs/DEMO.md`'s
+      setup step; the full §4 table gets the 5-settings sweep in Phase 6 as planned.
+- [x] Does `mark_retrieved`'s `usage_count` interact with the new `alpha`/`beta` bookkeeping in
+      any surprising way (e.g. double-counting)? They should remain fully independent counters —
+      write a test that bumps `usage_count` via retrieval without touching `alpha`/`beta`, and
+      vice versa. — `test_mark_retrieved_does_not_touch_alpha_beta`: confirmed fully independent
+      in both directions.
+- Full suite: 150 passed, 0 failed. `ruff check .` unchanged from baseline (2 pre-existing,
+  unrelated unused-import warnings, down from 3 -- Phase 2's `alpha`/`beta` fields incidentally
+  started using the previously-unused `dataclasses.field` import). `pyright` shows 2 more
+  instances of an already-pre-existing warning category (`meta.get(...)` results typed to include
+  chromadb's `SparseVector`/`MetadataListValue`, which pyright can't statically exclude from
+  `float()`/`int()` — the *same* pattern already present in `mark_retrieved` on `main`, just now
+  also present for `alpha`/`beta` alongside the pre-existing `success_score`/`usage_count`
+  instances); not a new category of type-safety issue, not fixed here (out of scope).
+
+---
+
+## 8. Phase 3 — Exploration floor / anti-starvation (fixes item 0.3)
+
+**Goal:** guarantee no incident can be permanently buried by the ranking formula.
+
+**Changes:**
+- [x] `rca_system/tools/retrieve_incidents.py`: change the sort key per the §4 formula. Update
+      the function's docstring (remember: **Gemini reads this docstring** to decide how to call
+      the tool — review the wording change for clarity from the calling model's perspective, not
+      only a human reader's). Extracted the bonus formula into a small `_exploration_bonus(
+      usage_count)` helper for direct unit testability (not called out explicitly by the plan, but
+      needed to test the "never exceeds the weight" / monotonic-decay properties without depending
+      on the fake embedding's exact similarity output).
+
+**Tests (`tests/test_retrieve_incidents.py`):**
+- [x] New: an incident with `success_score=0.0` and `usage_count=0` ranks **above** a competing
+      incident with a low-but-nonzero score and a high `usage_count`, when raw similarity is
+      comparable — proves the starvation floor works. —
+      `test_zeroed_incident_outranks_low_score_high_usage_competitor` (chosen numbers hold for
+      *any* similarity in [0,1], not just the fake embedding's actual output — see its docstring).
+- [x] New: an incident with `success_score=0.0` does **not** outrank a genuinely strong match
+      (high similarity, `success_score` near neutral) — proves the bonus doesn't overwhelm real
+      signal. Pick concrete numbers and show the arithmetic in the test. —
+      `test_exploration_bonus_does_not_overwhelm_a_strong_match`.
+- [x] Regression: `test_dynamic_reranking_boosts_high_score_hits` must still pass unmodified —
+      both records in that test have `usage_count=0`, so the bonus term is identical for both and
+      cancels out of the comparison; if this test needs to change, something is wrong with the
+      formula's tie-breaking, not the test. — Passes unmodified, confirmed.
+- [x] New: bonus magnitude is bounded — verify at `usage_count=0` the bonus never exceeds
+      `exploration_bonus_weight` (i.e. the formula can't blow up for any valid input). —
+      `test_exploration_bonus_never_exceeds_the_configured_weight` (also asserts monotonic decay
+      across usage_count 0-49).
+
+**Deviation (found during implementation, documented per the plan's own rule):** the checkpoint's
+literal framing — "confirm its rank... improves as `usage_count` climbs... of a zeroed-out
+incident" — would mean *that same* incident's own usage_count climbing, which actually
+**decreases** its own bonus (the formula explicitly "decays toward 0 as an incident accumulates
+retrievals", §4). Also, architecturally, `retrieve_incidents` only *re-ranks* the k items ChromaDB's
+raw cosine search already selected — the exploration bonus can never pull in an item ChromaDB's ANN
+search excluded, so "resurfacing from outside the top-k" isn't actually possible via this
+mechanism; only *ordering within* an already-returned candidate set changes. The test
+(`test_starved_incident_outranks_competitor_as_its_own_usage_climbs`) demonstrates the real,
+correct mechanism instead: a never-retrieved incident's constant max bonus eventually outlasts a
+frequently-retrieved *competitor's* decaying one — which is what actually prevents permanent
+burial. Not raised as a blocker (no ask-the-user needed) since the underlying formula is exactly
+per §4 and the test still proves the intended "no permanent burial" property; only the checkpoint
+prose's phrasing needed correcting here.
+
+**Checkpoint — results recorded 2026-07-28:**
+- [x] Small script or test simulating N=5 consecutive "neutral" retrievals of a
+      zeroed-out incident (via direct `IncidentMemory` calls, no live Gemini needed) — confirm
+      its rank among a fixed candidate set improves as `usage_count` climbs even while
+      `success_score` stays at `0.0`. This is a pure-Python checkpoint, no API cost. — Implemented
+      as `test_starved_incident_outranks_competitor_as_its_own_usage_climbs` (see the deviation
+      note above for the exact mechanism demonstrated). All 9 tests in the file pass; full suite
+      154 passed, 0 failed.
+
+**Critique checklist:**
+- [x] Could the exploration bonus ever change the **order** of the top-1 result in a way that
+      degrades `expected_incident_retrieval_recall`? Re-run `evaluate.py --ablation none --limit
+      5` and confirm recall@1 for in-domain scenarios is unaffected — this is exactly the kind of
+      side effect a well-intentioned bonus term can cause and it's cheap to check. — Ran on a
+      freshly-reset KB: Recall@5 **1.0**, MRR **1.0**, nDCG@5 **1.0**, keyword accuracy 0.8 (4/5
+      exact-or-partial) — retrieval recall fully unaffected.
+- [x] Is `usage_count` reset anywhere unexpectedly (e.g. by `reset_memory.py`, which re-seeds
+      from scratch) — confirm the exploration bonus behaves sanely immediately after a reset
+      (every incident at `usage_count=0`, so the bonus is uniform and effectively a no-op until
+      usage diverges — verify this is true and desired, not an oversight). — Confirmed desired:
+      `build_record()` never sets `usage_count`, so every freshly-seeded record defaults to 0
+      (dataclass default). Added an explicit assertion to
+      `test_seeder_produces_neutral_success_score` pinning this.
+
+---
+
+## 9. Phase 4 — Multi-sample reflection ensembling (fixes item 0.4)
+
+**Goal:** reduce single-sample noise in the reflection signal, per the limitation your own
+`docs/DEFENSE_GUIDE.md` already names.
+
+**Spike conclusion (recorded before writing any production code):** the primary design **is**
+straightforward, via a slightly different route than the plan's two named options (custom
+`BaseAgent` subclass, or `LoopAgent`+aggregator). Confirmed empirically
+(`FunctionTool()._get_declaration()` introspection, then a live smoke test) that: (1) `Agent`
+tools can be `async def` and can accept a `tool_context: ToolContext` parameter that ADK injects
+automatically and excludes from the Gemini-facing schema; (2) that tool can freely run its own
+internal `asyncio.gather` of independent raw `google.genai` calls, fully decoupled from ADK's own
+`Agent`/`Runner` machinery, with zero impact on `output_key` propagation (the *outer* `Agent`
+still writes `reflection_output` via its normal single tool-call-then-echo turn, exactly as
+before). This means the ensembling can live **entirely inside a new tool**
+(`rca_system/tools/reflection_ensemble.py`), leaving `reflection_agent` a plain `Agent` in the
+same slot, same `output_key`, same position in `root_agent.sub_agents` — the primary design,
+confirmed, no `LoopAgent` fallback needed.
+
+**Changes:**
+- [x] Implement the primary design from §4: concurrent multi-sample reflection inside the
+      existing `reflection_agent` pipeline slot (see spike conclusion above and the deviation
+      note below for exactly how).
+- [x] If the spike says the primary design is impractical, fall back to the `LoopAgent` +
+      aggregator design from §4 — **not needed**; see spike conclusion.
+- [x] Make `reflection_ensemble_size` actually control the fan-out (already added to `settings`
+      in Phase 0); confirm setting it to `1` reproduces exactly today's single-call behavior
+      (useful for cheap local iteration and for demos where cost matters more than signal
+      quality). — `test_run_ensemble_size_one_reproduces_single_sample_values`.
+- [x] Wire the two remaining Phase-0 diagnostic fields
+      (`reflection_ensemble_agreement`) in `scripts/evaluate.py`. — Also added
+      `ensemble_total_tokens` (not in the original plan, see deviation note) so the checkpoint's
+      own token-cost claim is actually measurable.
+
+**Deviation (architectural decision, made and documented per the plan's own rule, not a
+blocker):** `record_reflection` (Phase 1's gating/clamping logic, all 21 of its direct unit tests)
+is **completely untouched** — it remains importable and correct on its own. But it could not
+stay wired as `reflection_agent`'s *Gemini-facing* tool while also being ensembled, because
+ensembling fundamentally requires N *independent* Gemini calls, and a single LLM turn (the
+`Agent`'s one call to whatever tool it invokes) can only ever produce one proposal. Two options
+existed: (a) have the outer agent's own single turn count as "sample 1 of N" and fan out N-1 more
+from inside its tool (asymmetric: one sample goes through ADK's tool-calling contract, N-1 go
+through raw prompting — inconsistent sampling), or (b) make **every** sample go through the same
+raw-prompting path and reduce the outer agent's turn to a thin "call the tool, echo its result"
+dispatcher (uniform sampling, thin outer turn). Chose (b) for consistency. This requires a **new**
+tool (`ensemble_reflect`, in a new `rca_system/tools/reflection_ensemble.py`) that:
+  - takes **no Gemini-supplied arguments** — reads `retrieval_output`/`reasoning_output` from
+    `ToolContext.state` and the original log chunk from `ToolContext.user_content`, so there's
+    nothing for the model to mis-transcribe (and, as a side effect, its declared parameter schema
+    is empty, immune to the Phase 1 `additional_properties` bug by construction);
+  - internally fans out `settings.reflection_ensemble_size` raw `google.genai` calls via
+    `asyncio.gather`, reusing a compressed version of the pre-Phase-4 judgment prompt;
+  - gates each sample individually via `record_reflection`'s own `_gate_deltas` (imported, not
+    duplicated — extracted `_normalize_and_clamp_deltas`/`_normalize_quality` out of
+    `record_reflection` as shared helpers so nothing needed duplicating);
+  - aggregates (mean per id, majority-vote quality) and returns the same output shape
+    `record_reflection` used to.
+
+  Consequence: `reflection_agent`'s tool is now named `ensemble_reflect`, not `record_reflection`.
+  This is the **one** place the "primary design should require zero test changes" expectation
+  didn't fully hold: `tests/test_pipeline.py::test_reflection_agent_has_record_reflection_tool`
+  and `test_record_reflection_tool_schema_has_no_additional_properties_or_any_of` needed renaming
+  to check for `ensemble_reflect` instead. Every *structural* assertion (agent count, order,
+  `isinstance(agent, Agent)`, `output_key`s, upstream-state-key references) required **zero**
+  changes and passes unmodified — confirmed by running the suite, not assumed. `AGENTS.md`'s
+  pipeline table's `record_reflection` cell was corrected to `ensemble_reflect` now (a factual
+  fix caused directly by this phase); the fuller gating/pseudo-count nuance rewrite stays in
+  Phase 6 as planned.
+
+**Tests:**
+- [x] Pure-Python aggregation unit tests (no Gemini needed — feed 3 mock sample outputs
+      directly into the aggregation function): mean-of-proposed-deltas is correct when samples
+      disagree on which incidents even got a delta; majority vote for `overall_quality`
+      including the tie-break rule; a single wildly-different sample doesn't dominate the mean
+      (add a test with one outlier among 3 samples and confirm the aggregate stays close to the
+      other two, not pulled all the way to the outlier). — `tests/test_reflection_ensemble.py`,
+      14 tests covering `aggregate_samples`, `_majority_quality`, and `run_ensemble` end-to-end
+      with mocked sampling.
+- [x] Concurrency: confirm the 3 samples are actually issued concurrently, not sequentially
+      (assert on wall-clock time in a test with a mocked, artificially-delayed call, or inspect
+      that `asyncio.gather` — or the ADK equivalent — is actually used, not a `for` loop with
+      `await` inside it). — `test_run_ensemble_issues_samples_concurrently_not_sequentially`
+      (3×0.2s delayed mock samples complete in <0.4s total).
+- Plus (critique-driven, see below): graceful degradation when 1-of-3 and 3-of-3 samples fail,
+  and a dedicated test that `_sample_reflection` itself never raises.
+
+**Checkpoint (live Gemini, real cost) — results recorded 2026-07-28:**
+- [x] Ran `evaluate_memory_evolution.py --runs 3` (same command as the Phase 2 checkpoint, for a
+      direct comparison) with ensembling active
+      (`eval/memory-evolution-20260728-191838.md`):
+
+      | incident_id | baseline | run 1 | run 2 | run 3 |
+      |---|---|---|---|---|
+      | `db-deadlock-001` | 1.000 | 1.333 | 1.176 | 1.257 |
+      | `disk-full-log-001` | 1.000 | 1.221 | 1.321 | 1.382 |
+      | `jvm-oom-heap-001` | 1.000 | 1.000 | 1.067 | 1.263 |
+      | `redis-conn-refused-001` | 1.000 | 1.231 | 1.263 | 1.387 |
+      | `tls-cert-expired-001` | 1.000 | 0.923 | 1.067 | 1.263 |
+      | `upstream-timeout-payments-001` | 1.000 | 1.077 | 1.086 | 1.179 |
+
+      **Rigorous comparison** (population stdev of the 3 per-run deltas, per incident, vs. the
+      Phase 2 checkpoint's trajectory — not just eyeballing monotonicity, which is misleading
+      here because both trajectories still walk through 12 *different* scenarios each run, so
+      some cross-scenario variation is expected regardless of ensembling):
+
+      | incident | Phase 2 stdev | Phase 4 (ensembled) stdev | change |
+      |---|---|---|---|
+      | db-deadlock-001 | 0.126 | 0.200 | **+59%** (outlier, see below) |
+      | disk-full-log-001 | 0.046 | 0.068 | +48% |
+      | jvm-oom-heap-001 | 0.143 | 0.081 | -43% |
+      | redis-conn-refused-001 | 0.141 | 0.081 | -42% |
+      | tls-cert-expired-001 | 0.137 | 0.118 | -14% |
+      | upstream-timeout-payments-001 | 0.133 | 0.036 | -72% |
+      | **mean (all 6)** | **0.121** | **0.098** | **-19%** |
+      | **mean (excl. db-deadlock-001)** | **0.120** | **0.077** | **-36%** |
+
+      5 of 6 incidents show a real reduction in run-to-run score volatility (36% on average,
+      excluding the one outlier) — consistent with the ensembling hypothesis. `db-deadlock-001`
+      moves the *other* direction (nearly doubles); with only one 3-run trajectory per mechanism
+      (not repeated trials), this is plausibly ordinary scenario-level noise rather than a
+      systematic problem with ensembling, but it is an honest, real data point against a clean
+      win, not swept under the rug. Per-scenario `ensemble_agreement` (fraction of the 3 samples
+      agreeing on `overall_quality`) was **1.0** in both scenarios checked directly (a separate
+      `--limit 2` smoke run) -- the samples are highly internally consistent, which is
+      circumstantial support for the mean being a reliable aggregate even where the downstream
+      6-incident/3-run comparison is noisy.
+- [x] Confirmed the fan-out itself is correctly scoped: `_debug.ensemble_size == 3` and
+      `ensemble_succeeded == 3` on every successful call in the smoke run. **Token cost is NOT
+      roughly 3× as predicted, and here's why, measured, not assumed:** reflection-stage tokens
+      went from **8484.8/scenario** (Phase 1's full-run baseline, unchanged by Phases 2-3) to
+      **12440.5/scenario** (this phase's `--limit 2` smoke run, `12542` and `12339`) — a **~1.47×**
+      increase, not 3×. Root cause: the *pre*-Phase-4 mechanism's cost came from a full
+      ADK tool-calling round trip (the model proposes a function call, ADK executes it, then a
+      *second* model call re-sends the growing conversation history to produce the final echo).
+      Phase 4's 3 samples are independent, single-shot, tool-schema-free `generate_content` calls
+      with no conversation history to re-send each time -- each sample is individually cheaper
+      than the old single mechanism was, so fanning out 3 of them costs meaningfully less than
+      3× the old total. The fan-out count itself (3, not accidentally 1 or 9) is correctly
+      scoped; the *token-ratio* prediction in this plan just didn't anticipate the mechanism
+      change being cheaper per-call. Recording this discrepancy rather than silently reporting a
+      fabricated "~3×".
+
+**Critique checklist:**
+- [x] If one of the N concurrent calls raises (Gemini 503, timeout, malformed output), does the
+      aggregation degrade gracefully (aggregate over the surviving samples) rather than crashing
+      the whole pipeline run? Write a test that mocks one failing sample among three.
+      This directly addresses the transient-503 failure mode already observed in your own
+      `eval/experiments/SUMMARY-ablation-matrix.md` methodology note and `ragas-none-*.md`. —
+      `test_run_ensemble_degrades_gracefully_when_one_sample_fails` (1-of-3),
+      `test_run_ensemble_all_samples_failing_returns_empty_neutral_result` (3-of-3),
+      `test_sample_reflection_swallows_exceptions_and_returns_none` (the actual network-call
+      boundary never raises).
+- [x] Does `root_agent`'s structure still satisfy every assertion in `tests/test_pipeline.py`
+      and every reference in `AGENTS.md` §6's pipeline table? If the primary (non-fallback)
+      design was used, this should require zero changes to that table — confirm, don't assume. —
+      Confirmed by running the suite: every *structural* assertion (agent count/order,
+      `isinstance(Agent)`, output_keys, state-key references) passed unmodified; only the two
+      tool-*name*-specific tests needed updating (see deviation note above) and `AGENTS.md`'s
+      one pipeline-table cell for the tool name.
+- [x] Re-read the cost trade-off honestly: is a 3× token increase on the single most expensive
+      stage (reflection was already ~7.4K tokens/scenario) actually worth the noise reduction
+      you measured? If the checkpoint doesn't show a clear improvement, say so in the PR
+      description rather than shipping it uncritically — `reflection_ensemble_size` defaulting
+      to `1` (i.e., effectively shipping the *capability* but not turning it on by default) is a
+      legitimate outcome of this phase if the evidence doesn't support the cost. — Honest
+      verdict: the actual cost increase is ~1.47×, not 3× (see above) — smaller than predicted.
+      The noise-reduction evidence is a genuine, if imperfect, win: 5/6 incidents show a 36%
+      average reduction in run-to-run volatility, against one outlier moving the other way from
+      a single (not repeated) 3-run trial. Given the smaller-than-predicted cost and the
+      majority-positive (not clean-sweep) evidence, **keeping `reflection_ensemble_size=3` as the
+      shipped default** is the honest call here — not a forced "3× cost, marginal benefit"
+      trade-off, and it directly implements the improvement `docs/DEFENSE_GUIDE.md` already names
+      as this system's stated limitation. `reflection_ensemble_size=1` remains fully supported
+      and tested (`test_run_ensemble_size_one_reproduces_single_sample_values`) for anyone who
+      wants the cheaper, non-ensembled behavior (cost-sensitive demos, fast local iteration).
+
+---
+
+## 10. Phase 5 — Bounded knowledge-base scale-up & full validation (fixes item 0.5)
+
+**Goal:** de-risk the "k=5 of 6 touches almost everything" mechanical issue enough to trust the
+Tier 0 result, without turning this PR into a content-authoring project.
+
+**Changes:**
+- [x] Author 6–12 new incident files in `seed/incidents/`, following the exact frontmatter
+      schema `scripts/seed_knowledge_base.py` requires (`incident_id, title, severity,
+      root_cause, resolution, tags` + a markdown body — see `redis_connection_refused.md` as the
+      template). Aim for genuinely distinct categories (not near-duplicates of the existing 6),
+      so retrieval has real discrimination to do. Total KB size after this phase: ~12–18.
+      **This is explicitly capped here — do not scale further in this PR; see §9 for the deferred
+      full-scale version.** — Added exactly 8: `k8s-oom-kill-001` (Kubernetes OOMKilled),
+      `kafka-consumer-lag-001` (message-queue backlog), `db-pool-exhaustion-001` (connection-pool
+      leak), `api-key-expired-001` (third-party credential rotation), `cdn-stale-cache-001`
+      (CDN cache invalidation), `lb-health-check-flap-001` (load-balancer health-check tuning),
+      `node-memory-leak-001` (Node.js `EventEmitter` leak), `distributed-lock-stale-001`
+      (Redis lock with no TTL). Total KB: **14** incidents (within the 12–18 cap). Deliberately
+      avoided any DNS / rate-limit / feature-flag theming, since those are the three OOD
+      scenarios' territory and a matching incident would turn them in-domain by accident.
+- [x] Create `eval/incidents_tier0_validation.jsonl` (new file — do **not** edit the canonical
+      `eval/incidents.jsonl`, which stays untouched so the existing demo-ready 15-scenario set
+      keeps working exactly as-is) with 2 in-domain scenarios per new incident (mirroring the
+      existing paraphrase-robustness pattern) plus the existing 15 scenarios' equivalents against
+      the larger KB. — 31 scenarios total (15 existing + 16 new, 2 per new incident); canonical
+      `eval/incidents.jsonl` confirmed untouched (`git diff --stat` empty).
+
+**Tests:** no new unit tests expected in this phase; this is an evaluation/validation phase, not
+a code-change phase. If the new incident content reveals a bug in Phases 1–4, fix it as an
+explicit patch commit on this branch and note which earlier phase's checklist should have caught
+it (feed that back into this document for the next tier). — **One bug found and fixed**:
+`tests/test_reset_memory.py::test_reset_removes_existing_dir_and_reseeds` seeded the *real*
+`seed/incidents/` directory and queried with a hardcoded `k=10` similarity search to find a
+specific record and to sweep every record's score. With only 6 incidents this always returned
+everything; at 14 it's possible (and, with the deterministic hash-based fake embedding, actually
+happened) for `k=10` to exclude the specific record being checked, breaking the test. This latent
+assumption (`k` covers "all records") predates Phase 5 — it should have been written as a direct
+by-id/full-collection `.get()` from the start, not a similarity `.query()`, since the test's
+intent was never "top-k similarity," it was "look up this exact record" / "check every record."
+Fixed by switching both lookups to `_collection.get(...)` (by id, and unfiltered for the full
+sweep), which is correct regardless of seed-set size. Feeding back: **future phases that add
+fixture data reading the real `seed/incidents/` directory should default to by-id lookups, not
+`k=N` similarity queries, unless the test is specifically about ranking.**
+
+**Checkpoint — this phase's checkpoint *is* the Tier 0 acceptance test. Results recorded
+2026-07-28 (all runs against an isolated `CHROMA_PERSIST_DIR=./data/chroma-tier0-validation`,
+deleted afterward; the real `data/chroma` was untouched throughout and reset once at the end —
+see critique below):**
+- [x] `just reset-demo` against the expanded seed set (temporarily point `CHROMA_PERSIST_DIR` at
+      a scratch dir, or use the eval scripts' own sandboxing — do not clobber your working demo
+      KB while doing this).
+- [x] Run the full ablation matrix (`none, reflection_off, memory_frozen, no_rag, cot_only,
+      retrieval_only, react`) via `scripts/evaluate.py --ablation <variant> --dataset
+      eval/incidents_tier0_validation.jsonl` against the expanded KB. Use `--limit` smoke runs
+      first to catch obvious breakage before spending the full budget. — `--limit` smoke ran for
+      all 7 variants first (caught nothing broken), then the full 31-scenario run for each:
+
+      | Variant | Keyword acc (E+P) | Recall@5 | MRR | nDCG@5 | Mean latency (s) | Mean tokens |
+      |---|---|---|---|---|---|---|
+      | **none** | **1.0** (22 exact/9 partial/0 miss) | 1.0 | **0.982** | **0.987** | 30.09 | 28131.6 |
+      | **memory_frozen** | 1.0 (20/11/0) | 1.0 | **1.0** | **1.0** | 30.88 | 28385.3 |
+      | reflection_off | 0.935 (21/8/2) | 1.0 | 0.982 | 0.987 | 16.65 | 12746.1 |
+      | no_rag | 0.935 (20/9/2) | n/a (no RAG) | n/a | n/a | 11.00 | 4544.9 |
+      | cot_only | 0.968 (15/15/1) | n/a (no RAG) | n/a | n/a | 8.87 | 4464.9 |
+      | retrieval_only | 0.323 (3/7/21) | 1.0 | 1.0 | 1.0 | 0.06 | n/a |
+      | react | 1.0 (23/8/0) | n/a (different topology) | n/a | n/a | 4.93 | 2910.2 |
+
+      Full artifacts: `eval/results-20260728-221713.{json,md}` (`none`),
+      `eval/experiments/results-{memory_frozen,reflection_off,no_rag,cot_only,retrieval_only,
+      react}-*.{json,md}`.
+- [x] **Acceptance bar (actual numbers) — ALL FOUR CRITERIA MET:**
+  - `none`'s retrieval MRR (0.982) and nDCG@5 (0.987) are within `0.05` of `memory_frozen`'s
+    (1.0/1.0) — gaps are **0.018** and **0.013** respectively. ✅ (Not fully closed at this KB
+    size/scenario mix — `none` still trails `memory_frozen` slightly — but both gaps are roughly
+    a quarter of the allowed tolerance, a dramatic improvement over the Phase 0 baseline's 0.208 /
+    0.156 gaps at the smaller KB.)
+  - `none`'s keyword accuracy (**1.0**) is not the worst of the 7 variants — worst is
+    `retrieval_only` (0.323, the deliberate zero-hallucination floor). `none` is in fact tied for
+    *best* alongside `memory_frozen` and `react`. ✅
+  - No incident's `success_score` sits at the hard `0.0`/`2.0` clamp after a single validation
+    run: ran `evaluate_memory_evolution.py --dataset eval/incidents_tier0_validation.jsonl --runs
+    1` (28 in-domain scenarios) on a fresh reset — final scores ranged from **1.000 to 1.333**
+    across all 14 incidents (12 boosted, 2 unchanged, **0 demoted** — not just "none at the
+    clamp," none even trended negative). ✅ See
+    `eval/memory-evolution-20260728-224856.md`.
+  - `mean_top_retrieval_similarity` for in-domain scenarios does not regress versus the Phase 0
+    baseline: **0.641** (this run) vs **0.489** (Phase 0, `eval/results-20260727-222918.md`) —
+    higher, not lower. ✅ (The new incidents' narratives are, if anything, textually richer than
+    the original 6, which plausibly explains the increase; not a cause for concern either way
+    since the bar is "no regression.")
+
+**Critique checklist:**
+- [x] Are the new incidents actually distinguishable from each other and from the original 6, or
+      did you accidentally author near-duplicates that don't add real retrieval difficulty?
+      Spot-check by embedding two new incidents and confirming their similarity to each other is
+      lower than either's similarity to its own matching eval scenario. — Spot-checked 5
+      deliberately-confusable pairs with the **real** `all-MiniLM-L6-v2` embeddings (same-category
+      near-neighbors: k8s-oom-kill vs jvm-oom-heap, db-pool-exhaustion vs db-deadlock,
+      distributed-lock-stale vs db-deadlock, kafka-consumer-lag vs upstream-timeout,
+      node-memory-leak vs jvm-oom-heap). For every pair, the matching eval scenario's similarity
+      to its own incident (0.66–0.82) was clearly higher than its similarity to the confusable
+      competitor (0.27–0.54), and top-1 retrieval was correct in all 5 cases. Real discrimination
+      confirmed, not just distinct incident_ids.
+- [x] Did this phase accidentally mutate the production/demo ChromaDB directory
+      (`rca-agent-system/data/chroma`)? Confirm the validation run used an isolated directory and
+      run `just reset-demo` on the real one afterward regardless, to leave the repo in a clean
+      demo-ready state for Phase 6. — All Phase 5 evaluate/reset/memory-evolution commands used
+      `CHROMA_PERSIST_DIR=./data/chroma-tier0-validation` explicitly; confirmed via directory
+      mtimes that `data/chroma` was untouched during the whole validation run, then deleted the
+      scratch directory and ran a real (unscoped) `scripts/reset_memory.py` once at the end so the
+      live dev DB now reflects the full 14-incident seed set for Phase 6 onward.
+- [x] If the acceptance bar is **not** met after Phases 1–4, do not force it by re-tuning
+      constants until the number looks right on this one dataset (that's overfitting to 18
+      incidents). Instead, document the shortfall honestly in the PR description, and decide
+      explicitly whether to (a) iterate on Phases 1–4's design, or (b) ship what's improved so
+      far with the remaining gap noted as follow-up — both are legitimate, silently fudging the
+      threshold is not. — **Not applicable this time** — all four criteria passed without any
+      constant retuning; §4's formulas and defaults are unchanged from where Phases 1–4 left them.
+
+---
+
+## 11. Phase 6 — Full regression & PR assembly
+
+**Goal:** make sure nothing outside the reflection/memory surface broke, and that the repo's own
+documentation still tells the truth about how the system works.
+
+**Changes:**
+- [x] `cd rca-agent-system && uv run pytest -q` — full pass, zero skips beyond the pre-existing,
+      documented ones. — **170 passed, 0 failed, 0 skipped.**
+- [x] `cd classifier-service && uv run pytest -q` and `cd frontend && pnpm test && pnpm build` —
+      confirm untouched sub-projects genuinely are untouched (should pass trivially; if something
+      fails here, Tier 0 leaked scope somewhere). — classifier-service: **9 passed**. frontend:
+      **173 passed** (23 test files) + `pnpm build` succeeded (Next.js production build, all 9
+      routes). `git diff --stat main -- classifier-service/ frontend/` is **empty** — confirmed
+      zero scope leakage into either sub-project.
+- [x] Update documentation that describes the *old* mechanism as current behavior:
+  - `AGENTS.md` §4 (env var table — add the 5 new settings) and §6 (tool/agent table — the
+    delta-clamp description now needs the gating + pseudo-count nuance).
+  - `docs/RESEARCH_QUESTIONS.md` RQ1/RQ3 "Evidence from a run" notes.
+  - `docs/DEFENSE_GUIDE.md` — specifically the "How do you know score updates aren't random
+    noise," "What stops a malicious or incorrect reflection from poisoning memory," and "What's
+    the limitation of this approach you're most aware of" Q&As all need updated answers now that
+    gating, capping, and ensembling exist (the last one especially — the *stated* limitation was
+    "a stronger system would use multiple reflection samples and aggregate," which this tier
+    directly implements).
+  - `README.md` / `rca-agent-system/eval/README.md` — note the `just reset-demo` requirement.
+
+  All done — see the `docs(rca-agent): Tier 0 Phase 6` commit. Also updated (not originally
+  listed, found while sweeping for staleness): `rca-agent-system/README.md`'s tool listing/seed
+  count/test count, `.env.example`'s new settings, `update_memory.py`'s docstring, and two
+  pre-existing unused-import ruff warnings in files this tier already touches
+  (`tests/test_evaluate.py`, `tests/test_reset_memory.py`).
+- [x] Run `just reset-demo` on the real dev environment one final time so the repo is left in a
+      clean, demo-ready state. — Done at the end of Phase 5 (needed the 14-incident seed set live
+      for that phase's own validation-adjacent work); reverified just now still clean: 14
+      incidents, all at `success_score == 1.000`.
+
+**Definition of done for all of Tier 0:**
+- [x] All 6 phases' checkpoints recorded with actual numbers (not "looks good") in this file or
+      the PR description. — Every phase's Checkpoint section above has actual numbers and dated
+      artifact paths under `eval/` / `eval/experiments/`.
+- [x] Phase 5's acceptance bar met, or explicitly and honestly not-met with a documented reason.
+      — Met; see §10.
+- [x] Full test suite green across all three sub-projects. — 170 + 9 + 173 = **352 tests**, all
+      passing; frontend build green.
+- [x] Exactly one PR opened, containing all 6 phases' commits, with a description that includes
+      the before/after ablation-matrix table. —
+      https://github.com/Wathsu4/Reflection-Enhanced-Multi-Agent-RAG-RCA/pull/1
+- [x] Every "Critique checklist" box across every phase is checked or explicitly annotated with
+      why it doesn't apply. — Verified: 63 checked boxes, 0 unchecked outside this section as of
+      before this edit.
+
+**Critique checklist (final, whole-tier):**
+- [x] Read the PR diff top to bottom as if you are the thesis examiner, not the author. Does it
+      read as a coherent, well-motivated change, or as a pile of loosely-related tweaks? —
+      Coherent: each phase's commit message states the problem it closes, the mechanism, the
+      tests, and the measured before/after; Phase 0's motivating evidence (the ablation matrix
+      showing `memory_frozen` beating `none`) is the thread every later phase's checkpoint
+      re-measures against, ending in Phase 5 closing that exact gap (0.208/0.156 MRR/nDCG gap down
+      to 0.018/0.013) on a larger, harder KB. Deviations from the plan's literal wording (Phase 3's
+      checkpoint framing, Phase 4's tool rename, Phase 4's "3x" cost prediction) are each
+      documented inline with reasoning, not silently absorbed.
+- [x] Is there anything in here that only works "on my machine" (hardcoded paths, an assumption
+      about `data/chroma` being empty, an assumption about running from a specific working
+      directory)? `rca-agent-system` is a standalone uv project — changes must work via `uv run`
+      from that directory per `AGENTS.md`. — Grepped all of `rca-agent-system/**/*.py` for
+      hardcoded absolute paths (`/Users/`, `/home/<user>/`, `C:\Users`): **zero matches**. All
+      Tier 0 settings are `pydantic-settings` fields with relative-path defaults, consistent with
+      the pre-existing pattern. `reset_memory.py`/`seed_knowledge_base.py` are idempotent
+      upsert-by-id, so nothing assumes an empty starting collection. The Phase 5 validation run
+      used `CHROMA_PERSIST_DIR` env-var overrides (not code changes) to sandbox against a scratch
+      directory, so no committed code depends on that scratch path existing.
+- [x] Did scope creep in anywhere — e.g. did Phase 5 quietly grow past 12–18 incidents, or did
+      Phase 4 quietly touch retrieval ranking? If yes, split it out before merging. — Checked via
+      `git log --oneline main..HEAD -- <path>` per file: `retrieve_incidents.py` was touched by
+      exactly one commit (Phase 3); `seed/incidents/` was touched by exactly one commit (Phase 5,
+      exactly 8 new files, 14 total, within the 12–18 cap). No scope creep found.
+
+---
+
+## 12. Explicitly out of scope / deferred (do not do these under Tier 0)
+
+- Scaling the knowledge base to the full 50–200 incidents originally floated for item 0.5 — this
+  is real, valuable follow-up work but is its own effort, not a Tier-0 sub-task.
+- A runtime feature flag to toggle old-vs-new scoring behavior side by side — rejected in favor
+  of clean per-phase commits as the rollback mechanism (§3, Round 1).
+- Automatic migration/backfill of `alpha`/`beta` for pre-existing on-disk records — rejected in
+  favor of documenting `just reset-demo` as a required post-upgrade step (§3, Round 1).
+- Anything from Tiers 1–6 of the original improvement list (reranking, embedding-model upgrade,
+  human-in-the-loop feedback, graph memory, etc.) — those are separate tiers with their own plans.
+
+## 13. Risk register
+
+| Risk | Likelihood | Mitigation |
+|---|---|---|
+| Gemini doesn't reliably populate `used_incident_ids`, weakening Phase 1's gate | Medium | Phase 1's checkpoint explicitly audits this; if weak, strengthen `reasoning_agent.py`'s instruction as a noted, separate follow-up commit — don't silently work around it inside `record_reflection`. |
+| ADK doesn't cleanly support in-slot multi-sampling (Phase 4) | Medium | Spike-first requirement in Phase 4; documented fallback design already specified. |
+| Phase 5's acceptance bar isn't met even after Phases 1–4 | Medium | Explicitly allowed outcome (§10) — ship honestly, don't overfit constants to 18 incidents. |
+| Rate limits make the Phase 5 full-matrix checkpoint impractical in one sitting | Medium | Use `--limit` smoke runs first; run the full matrix in off-peak stretches; it only needs to happen once per phase, not repeatedly. |
+| Scope creep turns "one PR" into an unreviewable mega-diff | Low-Medium | §11's final critique checklist explicitly checks for this; phase commits keep it bisectable even if large. |
