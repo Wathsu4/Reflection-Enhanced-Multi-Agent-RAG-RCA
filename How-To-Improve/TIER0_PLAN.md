@@ -910,8 +910,9 @@ documentation still tells the truth about how the system works.
       — Met; see §10.
 - [x] Full test suite green across all three sub-projects. — 170 + 9 + 173 = **352 tests**, all
       passing; frontend build green.
-- [ ] Exactly one PR opened, containing all 6 phases' commits, with a description that includes
-      the before/after ablation-matrix table. — PR being opened immediately after this commit.
+- [x] Exactly one PR opened, containing all 6 phases' commits, with a description that includes
+      the before/after ablation-matrix table. —
+      https://github.com/Wathsu4/Reflection-Enhanced-Multi-Agent-RAG-RCA/pull/1
 - [x] Every "Critique checklist" box across every phase is checked or explicitly annotated with
       why it doesn't apply. — Verified: 63 checked boxes, 0 unchecked outside this section as of
       before this edit.
