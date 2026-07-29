@@ -872,12 +872,15 @@ see critique below):**
 documentation still tells the truth about how the system works.
 
 **Changes:**
-- [ ] `cd rca-agent-system && uv run pytest -q` — full pass, zero skips beyond the pre-existing,
-      documented ones.
-- [ ] `cd classifier-service && uv run pytest -q` and `cd frontend && pnpm test && pnpm build` —
+- [x] `cd rca-agent-system && uv run pytest -q` — full pass, zero skips beyond the pre-existing,
+      documented ones. — **170 passed, 0 failed, 0 skipped.**
+- [x] `cd classifier-service && uv run pytest -q` and `cd frontend && pnpm test && pnpm build` —
       confirm untouched sub-projects genuinely are untouched (should pass trivially; if something
-      fails here, Tier 0 leaked scope somewhere).
-- [ ] Update documentation that describes the *old* mechanism as current behavior:
+      fails here, Tier 0 leaked scope somewhere). — classifier-service: **9 passed**. frontend:
+      **173 passed** (23 test files) + `pnpm build` succeeded (Next.js production build, all 9
+      routes). `git diff --stat main -- classifier-service/ frontend/` is **empty** — confirmed
+      zero scope leakage into either sub-project.
+- [x] Update documentation that describes the *old* mechanism as current behavior:
   - `AGENTS.md` §4 (env var table — add the 5 new settings) and §6 (tool/agent table — the
     delta-clamp description now needs the gating + pseudo-count nuance).
   - `docs/RESEARCH_QUESTIONS.md` RQ1/RQ3 "Evidence from a run" notes.
@@ -888,28 +891,56 @@ documentation still tells the truth about how the system works.
     "a stronger system would use multiple reflection samples and aggregate," which this tier
     directly implements).
   - `README.md` / `rca-agent-system/eval/README.md` — note the `just reset-demo` requirement.
-- [ ] Run `just reset-demo` on the real dev environment one final time so the repo is left in a
-      clean, demo-ready state.
+
+  All done — see the `docs(rca-agent): Tier 0 Phase 6` commit. Also updated (not originally
+  listed, found while sweeping for staleness): `rca-agent-system/README.md`'s tool listing/seed
+  count/test count, `.env.example`'s new settings, `update_memory.py`'s docstring, and two
+  pre-existing unused-import ruff warnings in files this tier already touches
+  (`tests/test_evaluate.py`, `tests/test_reset_memory.py`).
+- [x] Run `just reset-demo` on the real dev environment one final time so the repo is left in a
+      clean, demo-ready state. — Done at the end of Phase 5 (needed the 14-incident seed set live
+      for that phase's own validation-adjacent work); reverified just now still clean: 14
+      incidents, all at `success_score == 1.000`.
 
 **Definition of done for all of Tier 0:**
-- [ ] All 6 phases' checkpoints recorded with actual numbers (not "looks good") in this file or
-      the PR description.
-- [ ] Phase 5's acceptance bar met, or explicitly and honestly not-met with a documented reason.
-- [ ] Full test suite green across all three sub-projects.
+- [x] All 6 phases' checkpoints recorded with actual numbers (not "looks good") in this file or
+      the PR description. — Every phase's Checkpoint section above has actual numbers and dated
+      artifact paths under `eval/` / `eval/experiments/`.
+- [x] Phase 5's acceptance bar met, or explicitly and honestly not-met with a documented reason.
+      — Met; see §10.
+- [x] Full test suite green across all three sub-projects. — 170 + 9 + 173 = **352 tests**, all
+      passing; frontend build green.
 - [ ] Exactly one PR opened, containing all 6 phases' commits, with a description that includes
-      the before/after ablation-matrix table.
-- [ ] Every "Critique checklist" box across every phase is checked or explicitly annotated with
-      why it doesn't apply.
+      the before/after ablation-matrix table. — PR being opened immediately after this commit.
+- [x] Every "Critique checklist" box across every phase is checked or explicitly annotated with
+      why it doesn't apply. — Verified: 63 checked boxes, 0 unchecked outside this section as of
+      before this edit.
 
 **Critique checklist (final, whole-tier):**
-- [ ] Read the PR diff top to bottom as if you are the thesis examiner, not the author. Does it
-      read as a coherent, well-motivated change, or as a pile of loosely-related tweaks?
-- [ ] Is there anything in here that only works "on my machine" (hardcoded paths, an assumption
+- [x] Read the PR diff top to bottom as if you are the thesis examiner, not the author. Does it
+      read as a coherent, well-motivated change, or as a pile of loosely-related tweaks? —
+      Coherent: each phase's commit message states the problem it closes, the mechanism, the
+      tests, and the measured before/after; Phase 0's motivating evidence (the ablation matrix
+      showing `memory_frozen` beating `none`) is the thread every later phase's checkpoint
+      re-measures against, ending in Phase 5 closing that exact gap (0.208/0.156 MRR/nDCG gap down
+      to 0.018/0.013) on a larger, harder KB. Deviations from the plan's literal wording (Phase 3's
+      checkpoint framing, Phase 4's tool rename, Phase 4's "3x" cost prediction) are each
+      documented inline with reasoning, not silently absorbed.
+- [x] Is there anything in here that only works "on my machine" (hardcoded paths, an assumption
       about `data/chroma` being empty, an assumption about running from a specific working
       directory)? `rca-agent-system` is a standalone uv project — changes must work via `uv run`
-      from that directory per `AGENTS.md`.
-- [ ] Did scope creep in anywhere — e.g. did Phase 5 quietly grow past 12–18 incidents, or did
-      Phase 4 quietly touch retrieval ranking? If yes, split it out before merging.
+      from that directory per `AGENTS.md`. — Grepped all of `rca-agent-system/**/*.py` for
+      hardcoded absolute paths (`/Users/`, `/home/<user>/`, `C:\Users`): **zero matches**. All
+      Tier 0 settings are `pydantic-settings` fields with relative-path defaults, consistent with
+      the pre-existing pattern. `reset_memory.py`/`seed_knowledge_base.py` are idempotent
+      upsert-by-id, so nothing assumes an empty starting collection. The Phase 5 validation run
+      used `CHROMA_PERSIST_DIR` env-var overrides (not code changes) to sandbox against a scratch
+      directory, so no committed code depends on that scratch path existing.
+- [x] Did scope creep in anywhere — e.g. did Phase 5 quietly grow past 12–18 incidents, or did
+      Phase 4 quietly touch retrieval ranking? If yes, split it out before merging. — Checked via
+      `git log --oneline main..HEAD -- <path>` per file: `retrieve_incidents.py` was touched by
+      exactly one commit (Phase 3); `seed/incidents/` was touched by exactly one commit (Phase 5,
+      exactly 8 new files, 14 total, within the 12–18 cap). No scope creep found.
 
 ---
 
