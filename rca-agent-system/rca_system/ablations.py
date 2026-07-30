@@ -39,12 +39,15 @@ idempotent (safe to call repeatedly, e.g. in tests).
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from google.adk.agents import Agent, SequentialAgent
 from google.adk.tools import FunctionTool
 
 from rca_system.settings import settings
+
+logger = logging.getLogger(__name__)
 
 
 def _clone_agent(agent: Agent, **overrides: Any) -> Agent:
@@ -93,13 +96,22 @@ def _apply_reflection_to_memory_frozen(
     a signal, but the loop is severed at the persistence step.
     """
     if not isinstance(incident_score_deltas, dict):
-        return {"updated": {}}
+        logger.warning(
+            "Ignoring incident_score_deltas of unsupported type %s",
+            type(incident_score_deltas).__name__,
+        )
+        return {"updated": {}, "skipped": {}, "frozen": True}
 
     results: dict[str, dict[str, float]] = {}
+    skipped: dict[str, str] = {}
     for incident_id, raw_delta in incident_score_deltas.items():
         try:
             delta = float(raw_delta)
         except (TypeError, ValueError):
+            logger.warning(
+                "Skipping incident %r: non-numeric delta %r", incident_id, raw_delta
+            )
+            skipped[str(incident_id)] = "invalid_delta"
             continue
         # new == old: the write is intentionally suppressed.
         results[str(incident_id)] = {
@@ -107,7 +119,7 @@ def _apply_reflection_to_memory_frozen(
             "new_score": 1.0,
             "delta": round(delta, 3),
         }
-    return {"updated": results, "frozen": True}
+    return {"updated": results, "skipped": skipped, "frozen": True}
 
 
 def _build_memory_update_agent_frozen() -> Agent:

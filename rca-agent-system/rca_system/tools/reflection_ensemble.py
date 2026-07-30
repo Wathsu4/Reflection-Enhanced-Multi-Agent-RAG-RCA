@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from typing import Any
 
 from google import genai
@@ -42,6 +43,8 @@ from rca_system.tools.record_reflection import (
     _normalize_id_list,
     _normalize_quality,
 )
+
+logger = logging.getLogger(__name__)
 
 # Lower = more conservative. Used to break `overall_quality` ties toward
 # the more conservative label (TIER0_PLAN.md SS4: "low > medium > high
@@ -67,12 +70,15 @@ Respond with ONLY a single JSON object (no code fences, no prose) with EXACTLY t
 
 
 async def _sample_reflection(
-    client: genai.Client, log_chunk: str, retrieval_output: str, reasoning_output: str
+    client: genai.Client | None,
+    log_chunk: str,
+    retrieval_output: str,
+    reasoning_output: str,
 ) -> tuple[dict[str, Any] | None, int]:
     """One independent Gemini sample of the reflection judgment.
 
-    Returns `(None, 0)` on any failure (network error, timeout,
-    malformed or non-JSON response) so the ensemble degrades gracefully
+    Returns `(None, 0)` on any failure (no usable client, network error,
+    timeout, malformed or non-JSON response) so the ensemble degrades gracefully
     over the surviving samples rather than failing the whole pipeline
     run. Otherwise returns `(parsed_dict, total_token_count)` -- these
     raw calls bypass ADK's own Runner/event stream entirely, so their
@@ -81,6 +87,9 @@ async def _sample_reflection(
     "roughly 3x tokens on the reflection stage" checkpoint actually be
     measured instead of assumed.
     """
+    if client is None:
+        return None, 0
+
     prompt = _SAMPLE_PROMPT.format(
         log_chunk=log_chunk or "(not available)",
         retrieval_output=retrieval_output,
@@ -97,8 +106,18 @@ async def _sample_reflection(
         usage = getattr(resp, "usage_metadata", None)
         tokens = int(getattr(usage, "total_token_count", 0) or 0) if usage else 0
         data = json.loads(resp.text or "")
-        return (data, tokens) if isinstance(data, dict) else (None, tokens)
+        if not isinstance(data, dict):
+            logger.warning(
+                "Reflection sample discarded: expected a JSON object, got %s",
+                type(data).__name__,
+            )
+            return None, tokens
+        return data, tokens
     except Exception:
+        # Deliberately non-fatal (see docstring), but never silent: a
+        # systematically failing sampler otherwise looks identical to a
+        # reflection that genuinely proposed no deltas.
+        logger.warning("Reflection sample failed; degrading the ensemble", exc_info=True)
         return None, 0
 
 
@@ -143,7 +162,11 @@ def _extract_retrieved_ids(retrieval_output: Any) -> list[str]:
         )
         hits = data.get("hits") or []
         return [str(h.get("incident_id")) for h in hits if h.get("incident_id")]
-    except Exception:
+    except (AttributeError, TypeError, ValueError) as exc:
+        # An unparseable retrieval_output disables both gates in
+        # `_gate_deltas`, so it must be loud -- it silently widens what
+        # the reflection stage is allowed to write to memory.
+        logger.warning("Could not extract retrieved incident ids: %s", exc)
         return []
 
 
@@ -171,7 +194,19 @@ async def run_ensemble(
         reasoning_output if isinstance(reasoning_output, str) else json.dumps(reasoning_output)
     )
 
-    client = genai.Client(api_key=settings.google_api_key)
+    client_error: str | None = None
+    try:
+        client = genai.Client(api_key=settings.google_api_key)
+    except Exception as exc:  # noqa: BLE001 -- e.g. missing/invalid API key
+        # Misconfiguration, not a transient sample failure. Reported
+        # rather than raised: an exception out of an ADK tool call aborts
+        # the whole run even though the reasoning stage already produced
+        # a usable hypothesis. Sampling still proceeds so the failure
+        # takes the same degradation path as any other sample failure.
+        logger.error("Reflection ensemble could not create a Gemini client: %s", exc)
+        client_error = f"{type(exc).__name__}: {exc}"
+        client = None
+
     raw_results = await asyncio.gather(
         *(
             _sample_reflection(client, log_chunk, retrieval_str, reasoning_str)
@@ -199,6 +234,10 @@ async def run_ensemble(
         if rationale:
             rationales.append(rationale)
 
+    failed = len(raw_results) - len(succeeded)
+    if failed:
+        logger.warning("%d of %d reflection samples failed", failed, len(raw_results))
+
     aggregated_deltas = aggregate_samples(gated_per_sample)
     overall_quality = _majority_quality(qualities)
     agreement = (
@@ -207,8 +246,14 @@ async def run_ensemble(
         else 0.0
     )
 
-    return {
-        "status": "recorded",
+    # "degraded" when the whole ensemble failed: downstream (and the
+    # eval tooling) must be able to tell "no incident earned a delta"
+    # apart from "we never got a judgment at all".
+    if not succeeded:
+        logger.error("All %d reflection samples failed; no reflection signal this run", n)
+
+    out: dict[str, Any] = {
+        "status": "recorded" if succeeded else "degraded",
         "incident_score_deltas": aggregated_deltas,
         "overall_quality": overall_quality,
         "rationale": " | ".join(rationales[:3]) if rationales else "",
@@ -217,10 +262,14 @@ async def run_ensemble(
             "negative_dropped_count": negative_dropped,
             "ensemble_size": n,
             "ensemble_succeeded": len(succeeded),
+            "ensemble_failed": failed,
             "ensemble_agreement": agreement,
             "ensemble_total_tokens": total_tokens,
         },
     }
+    if client_error is not None:
+        out["error"] = client_error
+    return out
 
 
 async def ensemble_reflect(tool_context: ToolContext) -> dict[str, Any]:
@@ -235,9 +284,12 @@ async def ensemble_reflect(tool_context: ToolContext) -> dict[str, Any]:
     mis-transcribe. Just call this tool once with no arguments.
 
     Returns:
-        A dict with the structured reflection record: status,
-        incident_score_deltas, overall_quality, rationale -- same shape
-        the single-sample reflection tool used to return. Also includes
+        A dict with the structured reflection record: status
+        ("recorded", or "degraded" when every sample failed and there is
+        therefore no reflection signal at all), incident_score_deltas,
+        overall_quality, rationale -- same shape the single-sample
+        reflection tool used to return, plus an `error` key when the
+        Gemini client itself could not be created. Also includes
         a `_debug` key with per-sample diagnostics (evaluation-only; the
         production pipeline ignores it).
     """

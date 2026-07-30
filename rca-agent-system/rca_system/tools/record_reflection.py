@@ -20,10 +20,13 @@ instruction.
 
 from __future__ import annotations
 
+import logging
 import math
 from typing import Any, Literal
 
 from rca_system.settings import settings
+
+logger = logging.getLogger(__name__)
 
 # Per-incident delta is bounded so a single bad reflection cycle can't
 # wreck the score for an incident. After ~5 bad runs, score still drops
@@ -47,6 +50,10 @@ def _normalize_id_list(value: Any) -> list[str] | None:
         return None
     if isinstance(value, (list, tuple, set)):
         return [str(v) for v in value]
+    logger.warning(
+        "Ignoring malformed id list of type %s; the corresponding delta gate is disabled",
+        type(value).__name__,
+    )
     return None
 
 
@@ -64,14 +71,20 @@ def _normalize_and_clamp_deltas(incident_score_deltas: Any) -> dict[str, float]:
     """
     if not isinstance(incident_score_deltas, dict):
         if isinstance(incident_score_deltas, list):
+            # `float(...)` here would raise on a non-numeric "delta"; the
+            # per-item coercion below is the single place that parses.
             incident_score_deltas = {
-                str(item.get("incident_id") or item.get("id")): float(
+                str(item.get("incident_id") or item.get("id")): (
                     item.get("delta") or item.get("score") or 0.0
                 )
                 for item in incident_score_deltas
                 if isinstance(item, dict)
             }
         else:
+            logger.warning(
+                "Ignoring incident_score_deltas of unsupported type %s",
+                type(incident_score_deltas).__name__,
+            )
             incident_score_deltas = {}
 
     clamped: dict[str, float] = {}
@@ -79,6 +92,9 @@ def _normalize_and_clamp_deltas(incident_score_deltas: Any) -> dict[str, float]:
         try:
             delta = float(raw)
         except (TypeError, ValueError):
+            logger.warning(
+                "Dropping non-numeric delta %r proposed for incident %r", raw, incident_id
+            )
             continue
         clamped[str(incident_id)] = max(_DELTA_MIN, min(_DELTA_MAX, delta))
     return clamped

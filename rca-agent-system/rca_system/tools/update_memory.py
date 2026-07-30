@@ -7,9 +7,12 @@ small makes the dynamic-memory behaviour auditable.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from rca_system.memory.chroma_store import IncidentMemory
+
+logger = logging.getLogger(__name__)
 
 # Module-level singleton: same lazy-init pattern as `retrieve_incidents`.
 # The first call constructs an `IncidentMemory`, which warms the
@@ -44,28 +47,42 @@ def apply_reflection_to_memory(
             asymptotically resists any single run dominating it.
 
     Returns:
-        A dict with key `updated`, mapping each *processed* incident_id
-        to a record like
-            {"old_score": 1.0, "new_score": 1.1, "delta": 0.1}.
-        Incidents that don't exist in memory are silently skipped (the
-        reflection agent may name an id from a prior run that has since
-        been removed).
+        A dict with keys `updated` -- mapping each *processed*
+        incident_id to a record like
+            {"old_score": 1.0, "new_score": 1.1, "delta": 0.1}
+        -- and `skipped`, mapping each incident_id that was NOT applied
+        to the reason ("unknown_incident" / "invalid_delta"). Skipping is
+        expected (the reflection agent may name an id from a prior run
+        that has since been removed) but is reported rather than
+        swallowed, so a run where nothing was written is
+        distinguishable from one where nothing was proposed.
     """
     memory = _get_memory()
     collection = memory._collection  # noqa: SLF001 -- intentional internal access
 
     if not isinstance(incident_score_deltas, dict):
-        return {"updated": {}}
+        logger.warning(
+            "Ignoring incident_score_deltas of unsupported type %s; no memory writes",
+            type(incident_score_deltas).__name__,
+        )
+        return {"updated": {}, "skipped": {}}
 
     results: dict[str, dict[str, float]] = {}
+    skipped: dict[str, str] = {}
     for incident_id, raw_delta in incident_score_deltas.items():
         try:
             delta = float(raw_delta)
         except (TypeError, ValueError):
+            logger.warning(
+                "Skipping incident %r: non-numeric delta %r", incident_id, raw_delta
+            )
+            skipped[str(incident_id)] = "invalid_delta"
             continue
 
         before = collection.get(ids=[str(incident_id)], include=["metadatas"])
         if not before["ids"]:
+            logger.warning("Skipping incident %r: not present in memory", incident_id)
+            skipped[str(incident_id)] = "unknown_incident"
             continue
         old = float((before["metadatas"][0] or {}).get("success_score", 1.0))
 
@@ -80,4 +97,4 @@ def apply_reflection_to_memory(
             "delta": round(delta, 3),
         }
 
-    return {"updated": results}
+    return {"updated": results, "skipped": skipped}

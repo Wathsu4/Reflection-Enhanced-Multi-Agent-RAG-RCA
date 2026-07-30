@@ -436,9 +436,17 @@ async def _run_pipeline_for_scenario(
             # ADK events expose `model_dump_json` on the pydantic model.
             try:
                 events_dict.append(json.loads(event.model_dump_json()))
-            except Exception:
-                # Best-effort: don't let serialization break the eval.
-                events_dict.append({"author": author})
+            except Exception as exc:  # noqa: BLE001
+                # Best-effort: don't let serialization break the eval, but
+                # record why the event trace is incomplete.
+                print(
+                    f"      ! could not serialize {author} event: "
+                    f"{type(exc).__name__}: {exc}",
+                    file=sys.stderr,
+                )
+                events_dict.append(
+                    {"author": author, "serialization_error": f"{type(exc).__name__}: {exc}"}
+                )
 
             actions = getattr(event, "actions", None)
             state_delta = getattr(actions, "state_delta", None) or {}
@@ -506,7 +514,11 @@ async def _llm_judge(
             )
             txt = (resp.text or "").strip().lower().split()[0]
             votes.append(txt if txt in {"yes", "partial", "no"} else "no")
-        except Exception:
+        except Exception as exc:  # noqa: BLE001
+            print(
+                f"      ! LLM judge vote failed: {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+            )
             votes.append("error")
     # Majority vote; ties default to the most conservative label (no).
     counts = {v: votes.count(v) for v in {"yes", "partial", "no", "error"}}

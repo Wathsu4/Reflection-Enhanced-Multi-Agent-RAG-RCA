@@ -19,6 +19,7 @@ or for the ADK web UI (debugging):
 from __future__ import annotations
 
 import importlib
+import logging
 import os
 from pathlib import Path
 
@@ -27,6 +28,12 @@ from fastapi import FastAPI, HTTPException
 from google.adk.cli.fast_api import get_fast_api_app
 
 from rca_system.settings import settings
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+logger = logging.getLogger("rca-agent-system")
 
 
 def _is_real_agent_app(name: str) -> bool:
@@ -40,7 +47,14 @@ def _is_real_agent_app(name: str) -> bool:
     """
     try:
         mod = importlib.import_module(name)
+    except ImportError:
+        # Non-package directories (data/, eval/, ...) are expected here.
+        logger.debug("Skipping %r: not an importable package", name, exc_info=True)
+        return False
     except Exception:
+        # An agent package that fails at import time is a real problem --
+        # it silently disappears from /list-apps otherwise.
+        logger.exception("Agent package %r failed to import; excluded from /list-apps", name)
         return False
     return hasattr(mod, "root_agent")
 

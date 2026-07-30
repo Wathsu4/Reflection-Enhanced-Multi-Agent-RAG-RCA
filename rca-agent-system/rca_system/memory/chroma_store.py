@@ -18,6 +18,7 @@ metadata schema -- run `just reset-demo` after upgrading.
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -29,6 +30,8 @@ from chromadb.config import Settings as ChromaSettings
 
 from rca_system.settings import settings
 from rca_system.tools.record_reflection import _DELTA_MAX, _DELTA_MIN
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -176,6 +179,7 @@ class IncidentMemory:
             ids=[incident_id], include=["metadatas"]
         )
         if not res["ids"]:
+            logger.warning("update_score: no incident %r in memory; nothing written", incident_id)
             return
         meta = dict(res["metadatas"][0])
 
@@ -204,7 +208,14 @@ class IncidentMemory:
             return
         res = self._collection.get(ids=incident_ids, include=["metadatas"])
         if not res["ids"]:
+            logger.warning(
+                "mark_retrieved: none of %d ids exist in memory; usage counters unchanged",
+                len(incident_ids),
+            )
             return
+        missing = set(incident_ids) - set(res["ids"])
+        if missing:
+            logger.warning("mark_retrieved: unknown incident ids skipped: %s", sorted(missing))
         now = time.time()
         updated = []
         for meta in res["metadatas"]:

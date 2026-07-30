@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import shutil
 import sys
@@ -33,6 +34,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from rca_system.eval_api.registry import Experiment
+
+logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 EVAL_DIR = PROJECT_ROOT / "eval"
@@ -161,7 +164,9 @@ class JobManager:
             try:
                 proc.terminate()
             except ProcessLookupError:
-                pass
+                # The child exited between the returncode check and the
+                # signal; the cancel still succeeded from the caller's POV.
+                logger.info("Job %s already exited before terminate()", job_id)
         return True
 
     # ---------- internals ----------
@@ -209,6 +214,7 @@ class JobManager:
                 if job.error is None:
                     job.error = f"script exited with code {rc}"
         except Exception as exc:  # noqa: BLE001 -- surface any failure to the UI
+            logger.exception("Evaluation job %s failed", job.id)
             job.status = "failed"
             job.error = f"{type(exc).__name__}: {exc}"
         finally:
@@ -252,6 +258,7 @@ class JobManager:
                 if isinstance(parsed, dict) and "event" in parsed:
                     event = parsed
             except json.JSONDecodeError:
+                logger.debug("Child emitted JSON-looking line that failed to parse: %s", stripped)
                 event = None
 
         if event is None:
@@ -281,7 +288,11 @@ class JobManager:
     def _relativize(path_str: str) -> str | None:
         try:
             return str(Path(path_str).resolve().relative_to(EVAL_DIR.resolve()))
-        except (ValueError, OSError):
+        except (ValueError, OSError) as exc:
+            # Not under eval/ (or unresolvable) -- the file can't be served
+            # by the path-traversal-guarded results route, so drop it, but
+            # say so: the UI would otherwise just show no result file.
+            logger.warning("Result path %s is not serveable from eval/: %s", path_str, exc)
             return None
 
     @staticmethod
@@ -291,8 +302,8 @@ class JobManager:
         try:
             if sandbox.exists():
                 shutil.rmtree(sandbox, ignore_errors=True)
-        except OSError:
-            pass
+        except OSError as exc:
+            logger.warning("Could not remove eval sandbox %s: %s", sandbox, exc)
 
     @staticmethod
     def _persist(job: Job) -> None:
@@ -301,8 +312,8 @@ class JobManager:
             (JOBS_DIR / f"{job.id}.json").write_text(
                 job.model_dump_json(indent=2), encoding="utf-8"
             )
-        except OSError:
-            pass
+        except OSError as exc:
+            logger.warning("Could not persist job %s to %s: %s", job.id, JOBS_DIR, exc)
 
 
 # Module-level singleton used by the routes.

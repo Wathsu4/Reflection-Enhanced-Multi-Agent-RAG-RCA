@@ -67,7 +67,10 @@ memory_update_agent = Agent(
         "  One bullet per incident in the tool's `updated` field, "
         "formatted as: '`<incident_id>`: <old_score> -> <new_score> "
         "(\u0394 <delta>)'. If `updated` is empty, write 'No memory "
-        "changes applied.'\n"
+        "changes applied.' If the tool's `skipped` field is non-empty, "
+        "add one bullet per entry: '`<incident_id>`: skipped "
+        "(<reason>)' -- a proposed delta that was not applied must be "
+        "reported, not omitted.\n"
         "\n"
         "Output ONLY the Markdown summary. No JSON, no code fences."
     ),

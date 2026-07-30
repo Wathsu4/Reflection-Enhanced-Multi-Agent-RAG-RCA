@@ -241,3 +241,86 @@ async def test_run_ensemble_issues_samples_concurrently_not_sequentially(
         f"Expected concurrent execution (~{delay}s), took {elapsed:.3f}s -- "
         "samples may be running sequentially instead of via asyncio.gather"
     )
+
+
+async def test_run_ensemble_reports_degraded_status_when_every_sample_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """"No incident earned a delta" and "we never got a judgment" both
+    produce an empty delta map, so the status field is the only way
+    downstream can tell them apart."""
+    monkeypatch.setattr(re_module.settings, "reflection_ensemble_size", 2)
+
+    async def always_fails(client, log_chunk, retrieval_output, reasoning_output):
+        return None, 0
+
+    monkeypatch.setattr(re_module, "_sample_reflection", always_fails)
+
+    out = await re_module.run_ensemble("log", {"hits": []}, {})
+    assert out["status"] == "degraded"
+    assert out["_debug"]["ensemble_failed"] == 2
+
+
+async def test_run_ensemble_stays_recorded_when_a_sample_survives(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(re_module.settings, "reflection_ensemble_size", 2)
+    calls = [(_sample(0.1, "high"), 100), (None, 0)]
+
+    async def flaky_sample(client, log_chunk, retrieval_output, reasoning_output):
+        return calls.pop(0)
+
+    monkeypatch.setattr(re_module, "_sample_reflection", flaky_sample)
+
+    out = await re_module.run_ensemble(
+        "log", {"hits": [{"incident_id": "a"}]}, {"used_incident_ids": ["a"]}
+    )
+    assert out["status"] == "recorded"
+    assert out["_debug"]["ensemble_failed"] == 1
+
+
+async def test_sample_reflection_logs_the_swallowed_exception(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class _ExplodingClient:
+        class aio:  # noqa: N801 -- mirrors genai.Client's attribute shape
+            class models:
+                @staticmethod
+                async def generate_content(**kwargs):
+                    raise RuntimeError("simulated network failure")
+
+    with caplog.at_level("WARNING"):
+        await re_module._sample_reflection(_ExplodingClient(), "log", "{}", "{}")  # type: ignore[arg-type]
+    assert "Reflection sample failed" in caplog.text
+    assert "simulated network failure" in caplog.text
+
+
+def test_extract_retrieved_ids_logs_unparseable_payload(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An unparseable retrieval_output disables both delta gates, so it
+    must not be a silent degradation."""
+    with caplog.at_level("WARNING"):
+        assert re_module._extract_retrieved_ids("{not json") == []
+    assert "Could not extract retrieved incident ids" in caplog.text
+
+
+async def test_run_ensemble_reports_client_construction_failure_instead_of_raising(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A missing/invalid API key must not raise out of the tool: that
+    aborts a run whose reasoning stage already produced a hypothesis."""
+    monkeypatch.setattr(re_module.settings, "reflection_ensemble_size", 2)
+
+    def exploding_client(**kwargs):
+        raise ValueError("No API key was provided.")
+
+    monkeypatch.setattr(re_module.genai, "Client", exploding_client)
+
+    with caplog.at_level("ERROR"):
+        out = await re_module.run_ensemble("log", {"hits": []}, {})
+
+    assert out["status"] == "degraded"
+    assert "No API key was provided." in out["error"]
+    assert out["incident_score_deltas"] == {}
+    assert "could not create a Gemini client" in caplog.text
