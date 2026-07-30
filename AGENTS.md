@@ -228,8 +228,15 @@ and is gitignored (`classifier-service/models/` in `.gitignore`).
   Phase 4) is the tool `reflection_agent` actually calls: internally
   fans out `settings.reflection_ensemble_size` independent, concurrent
   Gemini samples (`asyncio.gather`), gates each one, and aggregates
-  (mean deltas, majority-vote quality) before returning. `update_memory.py`
-  hands the (already clamped + gated) delta to `IncidentMemory.update_score`.
+  (mean deltas, majority-vote quality) before returning. Individual
+  sample failures are logged and degrade the ensemble; if *every* sample
+  fails it returns `status: "degraded"` (plus an `error` key when the
+  Gemini client itself couldn't be constructed) so "no incident earned a
+  delta" is distinguishable from "no judgment was obtained".
+  `update_memory.py` hands the (already clamped + gated) delta to
+  `IncidentMemory.update_score`, and reports every delta it did *not*
+  apply in a `skipped` map (`unknown_incident` / `invalid_delta`)
+  alongside `updated`.
 - **ChromaDB (`rca_system/memory/chroma_store.py`):**
   PersistentClient, cosine distance, `all-MiniLM-L6-v2` embeddings
   (~90 MB, downloaded on first use). Tests use a `FakeEmbeddingFunction`
@@ -298,6 +305,13 @@ and is gitignored (`classifier-service/models/` in `.gitignore`).
   seed/reset scripts, evaluation helpers, ablation factory, and the eval
   console (registry / routes / job lifecycle with a mocked subprocess).
   Tests use FakeEmbeddingFunction so no model downloads.
+- **Error-handling convention:** never swallow an exception silently.
+  Degrading (returning an empty/neutral result instead of raising) is
+  fine and often required — Gemini output is untrusted and an exception
+  out of an ADK tool aborts the whole run — but the failure must be
+  logged via a module-level `logging.getLogger(__name__)` and, when the
+  caller could act on it, reflected in the returned payload (`status`,
+  `error`, `skipped`). `except ...: pass` is not acceptable.
 
 ---
 

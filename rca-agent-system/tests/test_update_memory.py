@@ -87,28 +87,31 @@ def test_persists_new_score_to_memory(memory: IncidentMemory) -> None:
 # ---------- robustness ----------
 
 
-def test_unknown_id_is_silently_skipped(memory: IncidentMemory) -> None:
+def test_unknown_id_is_skipped_but_reported(memory: IncidentMemory) -> None:
     """The reflection agent sometimes references stale ids. We must
-    not raise -- the rest of the batch should still apply."""
+    not raise -- the rest of the batch should still apply, and the
+    skipped id must be reported rather than swallowed."""
     memory.add(make_record("known-001", score=1.0))
     out = um_module.apply_reflection_to_memory(
         {"known-001": 0.1, "ghost-001": 0.1}
     )
     assert "known-001" in out["updated"]
     assert "ghost-001" not in out["updated"]
+    assert out["skipped"] == {"ghost-001": "unknown_incident"}
 
 
 def test_non_numeric_delta_is_skipped(memory: IncidentMemory) -> None:
     memory.add(make_record("a"))
     out = um_module.apply_reflection_to_memory({"a": "not a number"})  # type: ignore[arg-type]
     assert out["updated"] == {}
+    assert out["skipped"] == {"a": "invalid_delta"}
 
 
 def test_garbage_argument_returns_empty_updated(
     memory: IncidentMemory,
 ) -> None:
     out = um_module.apply_reflection_to_memory("nope")  # type: ignore[arg-type]
-    assert out == {"updated": {}}
+    assert out == {"updated": {}, "skipped": {}}
 
 
 # ---------- clamping interaction with the cumulative score bound ----------

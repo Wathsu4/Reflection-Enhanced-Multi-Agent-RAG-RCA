@@ -7,6 +7,8 @@ whole pipeline halts.
 
 from __future__ import annotations
 
+import pytest
+
 from rca_system.tools.record_reflection import record_reflection
 
 
@@ -270,3 +272,25 @@ def test_debug_key_present_and_does_not_leak_into_deltas() -> None:
     assert "_debug" in out
     assert set(out["_debug"].keys()) == {"positive_dropped_count", "negative_dropped_count"}
     assert "_debug" not in out["incident_score_deltas"]
+
+
+def test_list_format_with_non_numeric_delta_does_not_raise() -> None:
+    """The `[{incident_id, delta}]` reshape used to coerce with a bare
+    `float(...)`, so one non-numeric delta raised out of a tool the
+    pipeline relies on never failing."""
+    out = record_reflection(
+        [
+            {"incident_id": "x", "delta": "not a number"},
+            {"incident_id": "y", "delta": -0.1},
+        ],  # type: ignore[arg-type]
+        "high",
+        "r",
+    )
+    assert out["incident_score_deltas"] == {"y": -0.1}
+
+
+def test_dropped_deltas_are_logged(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level("WARNING"):
+        record_reflection({"bad": "nope"}, "high", "r", used_incident_ids="not-a-list")  # type: ignore[arg-type]
+    assert "non-numeric delta" in caplog.text
+    assert "malformed id list" in caplog.text
