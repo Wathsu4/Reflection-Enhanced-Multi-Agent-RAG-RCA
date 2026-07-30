@@ -111,7 +111,7 @@ async function fetchJson<T>(
 // without spinning up a server.
 
 function sessionUrl(sessionId: string): string {
-  return `${AGENT_URL}/apps/${APP_NAME}/users/${USER_ID}/sessions/${sessionId}`;
+  return `${AGENT_URL}/apps/${APP_NAME}/users/${USER_ID}/sessions/${encodeURIComponent(sessionId)}`;
 }
 
 function listSessionsUrl(): string {

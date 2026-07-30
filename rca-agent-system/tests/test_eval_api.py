@@ -138,6 +138,13 @@ def test_result_path_traversal_guarded() -> None:
     assert r.status_code in (400, 404)
 
 
+def test_result_absolute_path_guarded() -> None:
+    # `eval_root / "/etc/hosts"` resolves to "/etc/hosts", so an absolute
+    # path must be rejected by the containment check too.
+    r = client.get("/eval/results//etc/hosts")
+    assert r.status_code in (400, 404)
+
+
 # -------------------- job lifecycle (faked subprocess) --------------------
 
 

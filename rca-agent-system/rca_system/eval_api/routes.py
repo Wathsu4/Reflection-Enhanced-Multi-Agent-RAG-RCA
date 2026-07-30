@@ -160,8 +160,10 @@ async def get_result(file_path: str) -> ResultFileResponse:
     """Return a result file's raw content. Guarded to the `eval/` tree."""
     eval_root = EVAL_DIR.resolve()
     target = (eval_root / file_path).resolve()
-    # Path-traversal guard: the resolved path must stay under eval/.
-    if eval_root not in target.parents and target != eval_root:
+    # Path-traversal guard: the resolved path (symlinks included) must stay
+    # strictly inside eval/. Absolute `file_path` values are also rejected
+    # here, since `eval_root / "/etc/passwd"` resolves to `/etc/passwd`.
+    if target == eval_root or not target.is_relative_to(eval_root):
         raise HTTPException(status_code=400, detail="invalid result path")
     if not target.is_file() or target.suffix not in {".json", ".md"}:
         raise HTTPException(status_code=404, detail="result file not found")
