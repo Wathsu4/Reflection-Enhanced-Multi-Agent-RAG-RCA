@@ -10,6 +10,12 @@
  * that polling is simpler and reconnection-safe.
  */
 
+import {
+  createHttpClient,
+  ServiceHttpError,
+  ServiceNetworkError,
+} from "@/lib/api/http";
+
 const AGENT_URL = process.env.NEXT_PUBLIC_AGENT_URL ?? "http://localhost:8000";
 
 // -------------------- shared types (mirror the backend pydantic models) --------------------
@@ -100,70 +106,23 @@ export interface ResultFileResponse {
 // -------------------- error classes --------------------
 
 /** Network-level failures: DNS, connection refused, CORS, abort. */
-export class EvalNetworkError extends Error {
-  constructor(message: string, public cause?: unknown) {
-    super(message);
-    this.name = "EvalNetworkError";
-  }
+export class EvalNetworkError extends ServiceNetworkError {
+  name = "EvalNetworkError";
 }
 
 /** Non-2xx HTTP responses from the eval API. */
-export class EvalHttpError extends Error {
-  constructor(
-    public status: number,
-    message: string,
-    public detail?: string,
-  ) {
-    super(message);
-    this.name = "EvalHttpError";
-  }
+export class EvalHttpError extends ServiceHttpError {
+  name = "EvalHttpError";
 }
 
-async function readDetail(res: Response): Promise<string | undefined> {
-  try {
-    const ct = res.headers.get("content-type") ?? "";
-    if (!ct.includes("application/json")) return undefined;
-    const body = (await res.json()) as { detail?: unknown };
-    if (typeof body?.detail === "string") return body.detail;
-    if (Array.isArray(body?.detail)) {
-      return body.detail
-        .map((d: { msg?: string }) => d?.msg ?? JSON.stringify(d))
-        .join("; ");
-    }
-    return undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-async function safeFetch(url: string, init: RequestInit): Promise<Response> {
-  try {
-    return await fetch(url, init);
-  } catch (err) {
-    throw new EvalNetworkError(`Could not reach agent service at ${url}`, err);
-  }
-}
-
-async function fetchJson<T>(url: string, init: RequestInit): Promise<T> {
-  const res = await safeFetch(url, init);
-  if (!res.ok) {
-    const detail = await readDetail(res);
-    const friendly =
-      res.status >= 500
-        ? `Eval service error (${res.status})`
-        : `Eval request rejected (${res.status})`;
-    throw new EvalHttpError(res.status, friendly, detail);
-  }
-  try {
-    return (await res.json()) as T;
-  } catch (err) {
-    throw new EvalHttpError(
-      res.status,
-      "Eval service returned invalid JSON",
-      err instanceof Error ? err.message : undefined,
-    );
-  }
-}
+const { fetchJson } = createHttpClient({
+  NetworkError: EvalNetworkError,
+  HttpError: EvalHttpError,
+  unreachableMessage: (url) => `Could not reach agent service at ${url}`,
+  serverErrorMessage: (status) => `Eval service error (${status})`,
+  rejectedMessage: (status) => `Eval request rejected (${status})`,
+  invalidJsonMessage: "Eval service returned invalid JSON",
+});
 
 // -------------------- URL builders --------------------
 

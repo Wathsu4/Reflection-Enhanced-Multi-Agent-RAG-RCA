@@ -277,7 +277,14 @@ and is gitignored (`classifier-service/models/` in `.gitignore`).
   `scripts/evaluate_memory_evolution.py` is the headline novelty experiment
   (score drift across runs); `scripts/evaluate_pairwise.py` and
   `scripts/evaluate_ragas.py` add the bias-mitigated A/B judge and the RAG
-  triad.
+  triad. Everything every eval script shares lives in
+  `scripts/_eval_common.py`: the `eval/` + `eval/experiments/` paths,
+  the `GOOGLE_API_KEY` env bridge (`bridge_genai_env`), the
+  `--progress-json` emitter (`emit_progress`), the Gemini `ask` factory
+  (`make_ask`), transient-error retries (`is_transient_error` /
+  `run_with_retry`), report writing (`report_target` / `write_report`),
+  and the in-process ADK Runner (`stream_pipeline_events`). Add a new
+  eval script by importing from there, not by copying an existing one.
 - **Eval console API (`rca_system/eval_api/`):** browse / re-run /
   inspect experiments from the frontend.
   - `registry.py` — declarative metadata for every experiment (id, title,
@@ -318,6 +325,7 @@ and is gitignored (`classifier-service/models/` in `.gitignore`).
   - `/evaluation/[id]` — per-experiment page: plain + technical description,
     params form, re-run control, polled live progress, results + history
 - **API clients (`frontend/src/lib/api/`):**
+  - `http.ts` — shared transport: `createHttpClient({NetworkError, HttpError, ...messages})` returns the `safeFetch` / `fetchJson` pair every client below uses, plus `readDetail` (lifts FastAPI's `detail`) and the `ServiceNetworkError` / `ServiceHttpError` bases the per-service error classes extend. Add a client by configuring this, not by copying one.
   - `classifier.ts` — `classify`, `getClassifierHealth`, `generateLogs` + typed error classes; optional keyword-mock fallback (`NEXT_PUBLIC_USE_MOCK=true`).
   - `agents.ts` — `getAgentHealth`, `createSession`, `getSession`, `listSessions`, **`runAgentSSE`** (custom POST-SSE async generator), `parseSseBlock` (exported for tests).
   - `evaluation.ts` — `listExperiments`, `getExperiment`, `runExperiment`, `getJob`, `cancelJob`, `getResult` against the `/eval/*` API. Mirrors `agents.ts` conventions (typed error classes, `fetchJson`, `__test__` exports). Job progress is **polled** (TanStack Query `refetchInterval`), not SSE.
@@ -328,7 +336,11 @@ and is gitignored (`classifier-service/models/` in `.gitignore`).
   `AbortSignal` to tear down.
 - **Hooks (`frontend/src/lib/hooks/`):** `useAgentStream`,
   `useAgentHealth`, `useClassifierHealth`, `useLogSimulator`,
-  `useInvestigationsQueue`. `useAgentStream` is the meaty one: it
+  `useInvestigationsQueue`. The two health hooks are thin wrappers over
+  `useServiceHealth` (shared poll config + ok/down/loading derivation);
+  only the `isHealthy` predicate differs (the classifier additionally
+  requires `model_loaded`). Their pills render through the shared
+  `components/status-pill.tsx`. `useAgentStream` is the meaty one: it
   consumes the SSE generator and aggregates raw events into per-author
   groups via a pure `aggregateEvents()` function.
 - **Tests:** Vitest + jsdom, colocated `*.test.ts(x)` next to source.
@@ -614,6 +626,18 @@ token/usage tracking entirely (see `scripts/evaluate.py`'s
 `_apply_reflection_diagnostics`, which now has to fold the tool's
 self-reported `_debug.ensemble_total_tokens` back into `stage_tokens`
 manually, or that cost is silently invisible to every token-based metric).
+
+### 2026-07-30 — the agent test suite needs *some* `GOOGLE_API_KEY` in the env
+context: running `uv run pytest -q` on a fresh clone (no
+`rca-agent-system/.env`) fails 5 tests in
+`tests/test_reflection_ensemble.py` with
+`ValueError: No API key was provided`.
+note: not a broken test — `reflection_ensemble.py` constructs a real
+`genai.Client(api_key=settings.google_api_key)` before the monkeypatched
+`_sample_reflection` is ever called, and the client validates the key's
+*presence* at construction time. Any non-empty value works (no network
+call is made): `GOOGLE_API_KEY=test-dummy uv run pytest -q` → all green.
+Don't "fix" this by editing the tests.
 
 ### 2026-07-28 — a hardcoded `k` in a test can silently assume "k covers every record"
 context: Tier 0 Phase 5 grew `seed/incidents/` from 6 to 14 files;

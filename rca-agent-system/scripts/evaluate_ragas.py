@@ -36,39 +36,34 @@ import re
 import sys
 import time
 from dataclasses import asdict, dataclass
+from functools import partial
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any, Callable
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from rca_system.ablations import ABLATIONS, DETERMINISTIC_ABLATIONS, build_root_agent  # noqa: E402
-from rca_system.settings import settings  # noqa: E402
-
-# Bridge the API key into the env for the in-process ADK Runner (see
-# evaluate.py for the rationale).
-import os  # noqa: E402
-
-if settings.google_api_key and not os.environ.get("GOOGLE_API_KEY"):
-    os.environ["GOOGLE_API_KEY"] = settings.google_api_key
-if not os.environ.get("GOOGLE_GENAI_USE_VERTEXAI"):
-    os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = settings.google_genai_use_vertexai
-
-# Reuse the dataset loader + root-cause extractor from the main eval script.
-from scripts.evaluate import (  # noqa: E402
-    Scenario,
-    _emit_progress,
-    _is_transient_error,
-    load_scenarios,
+from rca_system.ablations import ABLATIONS, DETERMINISTIC_ABLATIONS  # noqa: E402
+from scripts._eval_common import (  # noqa: E402
+    DEFAULT_DATASET,
+    EXPERIMENTS_DIR,
+    AskFn,
+    bridge_genai_env,
+    emit_progress,
+    make_ask,
+    run_with_retry,
+    state_delta,
+    stream_pipeline_events,
+    write_report,
 )
 
-EVAL_DIR = PROJECT_ROOT / "eval"
-EXPERIMENTS_DIR = EVAL_DIR / "experiments"
-DEFAULT_DATASET = EVAL_DIR / "incidents.jsonl"
+# Reuse the dataset loader + root-cause extractor from the main eval script.
+from scripts.evaluate import Scenario, load_scenarios  # noqa: E402
 
-# Async callable shapes for dependency injection in tests.
-AskFn = Callable[[str], Awaitable[str]]
+bridge_genai_env()
+
+# Async callable shape for dependency injection in tests.
 EmbedFn = Callable[[list[str]], list[list[float]]]
 
 
@@ -214,25 +209,15 @@ class RagasResult:
 async def _run_pipeline_capture(scenario: Scenario, ablation: str) -> dict[str, Any]:
     """Run the pipeline variant and capture the final report plus the
     retrieval and reasoning JSON payloads from session state."""
-    from google.adk.runners import Runner
-    from google.adk.sessions import InMemorySessionService
-    from google.genai.types import Content, Part
-
-    agent = build_root_agent(ablation)
-    session_service = InMemorySessionService()
-    session = await session_service.create_session(app_name="rca_system", user_id="ragas")
-    runner = Runner(agent=agent, app_name="rca_system", session_service=session_service)
-    msg = Content(role="user", parts=[Part(text=scenario.log_chunk)])
-
     final_output: str | None = None
     retrieval_payload: Any = None
     reasoning_payload: Any = None
     error: str | None = None
     try:
-        async for event in runner.run_async(
-            user_id=session.user_id, session_id=session.id, new_message=msg
+        async for event in stream_pipeline_events(
+            scenario.log_chunk, ablation=ablation, user_id="ragas"
         ):
-            sd = getattr(getattr(event, "actions", None), "state_delta", None) or {}
+            sd = state_delta(event)
             if isinstance(sd.get("final_output"), str) and sd["final_output"].strip():
                 final_output = sd["final_output"]
             if "retrieval_output" in sd:
@@ -256,24 +241,7 @@ async def _run_pipeline_capture(scenario: Scenario, ablation: str) -> dict[str, 
     }
 
 
-# -------------------- Gemini ask + embed (production impls) --------------------
-
-
-def _make_ask() -> AskFn:
-    from google import genai
-    from google.genai import types as gt
-
-    client = genai.Client(api_key=settings.google_api_key)
-
-    async def ask(prompt: str) -> str:
-        resp = await client.aio.models.generate_content(
-            model=settings.gemini_model,
-            contents=prompt,
-            config=gt.GenerateContentConfig(temperature=0.0),
-        )
-        return resp.text or ""
-
-    return ask
+# -------------------- embed (production impl) --------------------
 
 
 def _make_embed() -> EmbedFn:
@@ -377,39 +345,38 @@ async def amain(args: argparse.Namespace) -> int:
     progress = args.progress_json
     n = len(scenarios)
     print(f"RAGAS eval: {n} scenarios, ablation={args.ablation}", file=sys.stderr)
-    _emit_progress(progress, event="run_start", kind="ragas", total=n, ablation=args.ablation)
+    emit_progress(progress, event="run_start", kind="ragas", total=n, ablation=args.ablation)
 
-    ask = _make_ask()
+    ask = make_ask()
     embed = _make_embed()
 
     results: list[RagasResult] = []
     for i, sc in enumerate(scenarios, 1):
         print(f"  [{i}/{n}] {sc.id}", file=sys.stderr, flush=True)
-        _emit_progress(progress, event="scenario_start", i=i, n=n, id=sc.id)
+        emit_progress(progress, event="scenario_start", i=i, n=n, id=sc.id)
         # Retry the scenario on transient Gemini errors (503/429/timeout) so a
         # demand spike doesn't poison the metrics, mirroring evaluate.py.
-        r = await score_scenario(sc, args.ablation, ask=ask, embed=embed)
-        attempt = 0
-        while _is_transient_error(r.error) and attempt < args.retries:
-            delay = args.retry_delay * (2**attempt)
-            print(f"      transient error on {sc.id}; retry "
-                  f"{attempt + 1}/{args.retries} in {delay:.0f}s", file=sys.stderr, flush=True)
-            await asyncio.sleep(delay)
-            attempt += 1
-            r = await score_scenario(sc, args.ablation, ask=ask, embed=embed)
+        r = await run_with_retry(
+            partial(score_scenario, sc, args.ablation, ask=ask, embed=embed),
+            error_of=lambda res: res.error,
+            label=sc.id,
+            retries=args.retries,
+            base_delay=args.retry_delay,
+        )
         results.append(r)
-        _emit_progress(
+        emit_progress(
             progress, event="scenario_done", i=i, n=n, id=sc.id,
             faithfulness=r.faithfulness, answer_relevancy=r.answer_relevancy,
             context_precision=r.context_precision, error=r.error,
         )
 
-    EXPERIMENTS_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = time.strftime("%Y%m%d-%H%M%S")
-    md_path = EXPERIMENTS_DIR / f"ragas-{args.ablation}-{timestamp}.md"
-    md_path.write_text(_render_report(results, args.ablation), encoding="utf-8")
-    print(f"Wrote {md_path}", file=sys.stderr)
-    _emit_progress(
+    md_path = write_report(
+        EXPERIMENTS_DIR,
+        f"ragas-{args.ablation}-{timestamp}.md",
+        _render_report(results, args.ablation),
+    )
+    emit_progress(
         progress,
         event="run_done",
         summary={
