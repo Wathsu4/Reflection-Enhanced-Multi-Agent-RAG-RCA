@@ -143,6 +143,6 @@ async def reset_memory() -> dict[str, object]:
 if __name__ == "__main__":
     uvicorn.run(
         app,
-        host="0.0.0.0",
+        host=settings.adk_host,
         port=settings.adk_port,
     )

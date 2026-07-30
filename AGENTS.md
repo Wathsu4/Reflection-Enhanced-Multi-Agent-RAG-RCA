@@ -145,6 +145,7 @@ required vars. In practice you copy each sub-project's
 | `GOOGLE_API_KEY` | _none_ | agent | **Required.** Gemini API key. |
 | `GOOGLE_GENAI_USE_VERTEXAI` | `FALSE` | agent | `TRUE` for Vertex AI, `FALSE` for public Gemini API. |
 | `GEMINI_MODEL` | `gemini-2.5-flash` | agent | All four sub-agents share this model. |
+| `ADK_HOST` | `127.0.0.1` | agent | Bind address. Loopback by default — neither service authenticates, so use `0.0.0.0` only behind an authenticating proxy. |
 | `ADK_PORT` | `8000` | agent | |
 | `ADK_CORS_ORIGINS` | `http://localhost:3000` | agent | Comma-separated. |
 | `CHROMA_PERSIST_DIR` | `./data/chroma` | agent | Relative to `rca-agent-system/`. |
@@ -158,6 +159,7 @@ required vars. In practice you copy each sub-project's
 | `REFLECTION_ENSEMBLE_SIZE` | `3` | agent | Tier 0 Phase 4: number of independent reflection samples aggregated per run; `1` reproduces pre-Tier-0 single-shot behavior. |
 | `CLASSIFIER_MODEL_PATH` | `./models/modernbert-log-severity-v1` | classifier | Relative to `classifier-service/`. |
 | `CLASSIFIER_DEVICE` | `auto` | classifier | `auto` / `cpu` / `cuda` / `mps` (Apple Silicon). |
+| `CLASSIFIER_HOST` | `127.0.0.1` | classifier | Bind address passed to uvicorn by `scripts/run-all.sh`. |
 | `CLASSIFIER_PORT` | `8001` | classifier | |
 | `CLASSIFIER_CORS_ORIGINS` | `http://localhost:3000` | classifier | Comma-separated. |
 | `CLASSIFIER_MAX_CHUNK_BYTES` | `500000` | classifier | Per-request size guard. |
@@ -165,6 +167,13 @@ required vars. In practice you copy each sub-project's
 | `NEXT_PUBLIC_CLASSIFIER_URL` | `http://localhost:8001` | frontend | |
 | `NEXT_PUBLIC_AGENT_URL` | `http://localhost:8000` | frontend | |
 | `NEXT_PUBLIC_USE_MOCK` | `false` | frontend | `true` opts into keyword-mock classifier (useful offline). |
+
+**Security posture:** Both services are **unauthenticated** and therefore
+bind to loopback by default (`ADK_HOST` / `CLASSIFIER_HOST`). Anything
+reachable on the agent port can spend Gemini quota (`POST /run_sse`) and
+start evaluation subprocesses (`POST /eval/experiments/{id}/run`), so put
+an authenticating reverse proxy in front before binding `0.0.0.0`. CORS is
+allow-listed from env (`*_CORS_ORIGINS`) — don't widen it to `*`.
 
 **Secrets:** Never commit a real `GOOGLE_API_KEY`. `.env` and
 `.env.local` are gitignored. The fine-tuned model is **not in git** —

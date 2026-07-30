@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     google_genai_use_vertexai: str = "FALSE"
 
     # --- ADK server ---
+    # Loopback by default: the service has no authentication of its own, and
+    # its endpoints spend Gemini quota and can start evaluation subprocesses.
+    # Set 0.0.0.0 only behind an authenticating reverse proxy.
+    adk_host: str = "127.0.0.1"
     adk_port: int = 8000
     adk_cors_origins: str = "http://localhost:3000"
 
