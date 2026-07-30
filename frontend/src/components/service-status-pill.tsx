@@ -1,13 +1,12 @@
 "use client";
 
-import { useClassifierHealth } from "@/lib/hooks/useClassifierHealth";
-import { cn } from "@/lib/utils";
+/**
+ * Small live indicator showing whether the classifier service is reachable.
+ * Lives in the top nav. Re-checks every 10s via {@link useClassifierHealth}.
+ */
 
-const DOT_STYLES = {
-  ok: "bg-green-500",
-  down: "bg-red-500",
-  loading: "bg-gray-400 animate-pulse",
-} as const;
+import { StatusPill } from "@/components/status-pill";
+import { useClassifierHealth } from "@/lib/hooks/useClassifierHealth";
 
 const LABELS = {
   ok: "Classifier",
@@ -15,10 +14,6 @@ const LABELS = {
   loading: "Checking…",
 } as const;
 
-/**
- * Small live indicator showing whether the classifier service is reachable.
- * Lives in the top nav. Re-checks every 10s via {@link useClassifierHealth}.
- */
 export function ServiceStatusPill() {
   const { status, data } = useClassifierHealth();
 
@@ -31,22 +26,12 @@ export function ServiceStatusPill() {
       : "Probing classifier service…";
 
   return (
-    <div
-      className="flex items-center gap-2 rounded-full border bg-background px-3 py-1 text-xs"
-      title={tooltip}
-      role="status"
-      aria-live="polite"
-      data-testid="service-status-pill"
-      data-status={status}
-    >
-      <span
-        className={cn("h-2 w-2 rounded-full", DOT_STYLES[status])}
-        aria-hidden="true"
-      />
-      <span className="font-medium">{LABELS[status]}</span>
-      {status === "ok" && data?.device && (
-        <span className="text-muted-foreground">· {data.device}</span>
-      )}
-    </div>
+    <StatusPill
+      status={status}
+      label={LABELS[status]}
+      tooltip={tooltip}
+      detail={data?.device}
+      testId="service-status-pill"
+    />
   );
 }

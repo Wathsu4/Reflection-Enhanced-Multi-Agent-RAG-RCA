@@ -25,9 +25,12 @@ from pathlib import Path
 from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from scripts._eval_common import EXPERIMENTS_DIR, emit_progress, write_report  # noqa: E402
+
 REPO_ROOT = PROJECT_ROOT.parent
-EVAL_DIR = PROJECT_ROOT / "eval"
-EXPERIMENTS_DIR = EVAL_DIR / "experiments"
 
 # Default location of the fine-tuned model's training metadata.
 DEFAULT_METADATA_PATH = (
@@ -46,12 +49,6 @@ _CLASS_LABEL = {
     "warning": "WARNING",
     "normal": "NORMAL",
 }
-
-
-def _emit_progress(enabled: bool, **fields: Any) -> None:
-    if not enabled:
-        return
-    print(json.dumps(fields, default=str), flush=True)
 
 
 def _fmt(v: Any, digits: int = 4) -> str:
@@ -107,8 +104,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     progress = args.progress_json
 
-    _emit_progress(progress, event="run_start", kind="classifier_metrics", total=1)
-    _emit_progress(progress, event="scenario_start", i=1, n=1, id="classifier-test-split")
+    emit_progress(progress, event="run_start", kind="classifier_metrics", total=1)
+    emit_progress(progress, event="scenario_start", i=1, n=1, id="classifier-test-split")
 
     if not args.metadata_path.is_file():
         msg = (
@@ -117,21 +114,18 @@ def main(argv: list[str] | None = None) -> int:
             "at an existing training_metadata.json."
         )
         print(msg, file=sys.stderr)
-        _emit_progress(progress, event="scenario_done", i=1, n=1, id="classifier-test-split", error=msg)
+        emit_progress(progress, event="scenario_done", i=1, n=1, id="classifier-test-split", error=msg)
         return 2
 
     meta = json.loads(args.metadata_path.read_text(encoding="utf-8"))
     md = _render_report(meta)
 
-    EXPERIMENTS_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = time.strftime("%Y%m%d-%H%M%S")
-    md_path = EXPERIMENTS_DIR / f"classifier-metrics-{timestamp}.md"
-    md_path.write_text(md, encoding="utf-8")
-    print(f"Wrote {md_path}", file=sys.stderr)
+    md_path = write_report(EXPERIMENTS_DIR, f"classifier-metrics-{timestamp}.md", md)
 
     tr = meta.get("test_results", {}) or {}
-    _emit_progress(progress, event="scenario_done", i=1, n=1, id="classifier-test-split", error=None)
-    _emit_progress(
+    emit_progress(progress, event="scenario_done", i=1, n=1, id="classifier-test-split", error=None)
+    emit_progress(
         progress,
         event="run_done",
         summary={

@@ -6,14 +6,8 @@
  * in the top nav. Re-checks every 10s via {@link useAgentHealth}.
  */
 
+import { StatusPill } from "@/components/status-pill";
 import { useAgentHealth } from "@/lib/hooks/useAgentHealth";
-import { cn } from "@/lib/utils";
-
-const DOT_STYLES = {
-  ok: "bg-green-500",
-  down: "bg-red-500",
-  loading: "bg-gray-400 animate-pulse",
-} as const;
 
 const LABELS = {
   ok: "Agent",
@@ -32,24 +26,13 @@ export function AgentStatusPill() {
         : "Probing agent service…";
 
   return (
-    <div
-      className="flex items-center gap-2 rounded-full border bg-background px-3 py-1 text-xs"
-      title={tooltip}
-      role="status"
-      aria-live="polite"
-      data-testid="agent-status-pill"
-      data-status={status}
-    >
-      <span
-        className={cn("h-2 w-2 rounded-full", DOT_STYLES[status])}
-        aria-hidden="true"
-      />
-      <span className="font-medium">{LABELS[status]}</span>
-      {status === "ok" && data?.model && (
-        <span className="text-muted-foreground hidden sm:inline">
-          · {data.model.replace(/^gemini-/, "")}
-        </span>
-      )}
-    </div>
+    <StatusPill
+      status={status}
+      label={LABELS[status]}
+      tooltip={tooltip}
+      detail={data?.model?.replace(/^gemini-/, "")}
+      detailClassName="hidden sm:inline"
+      testId="agent-status-pill"
+    />
   );
 }

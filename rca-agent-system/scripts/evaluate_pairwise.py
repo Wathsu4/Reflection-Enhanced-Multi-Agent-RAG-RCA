@@ -27,37 +27,32 @@ import argparse
 import asyncio
 import glob
 import json
+import os
 import sys
 import time
 from dataclasses import asdict, dataclass, field
+from functools import partial
 from pathlib import Path
-from typing import Awaitable, Callable
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from rca_system.ablations import ABLATIONS  # noqa: E402
-from rca_system.settings import settings  # noqa: E402
-
-import os  # noqa: E402
-
-if settings.google_api_key and not os.environ.get("GOOGLE_API_KEY"):
-    os.environ["GOOGLE_API_KEY"] = settings.google_api_key
-if not os.environ.get("GOOGLE_GENAI_USE_VERTEXAI"):
-    os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = settings.google_genai_use_vertexai
-
-from scripts.evaluate import (  # noqa: E402
-    _emit_progress,
-    _is_transient_error,
-    load_scenarios,
+from scripts._eval_common import (  # noqa: E402
+    DEFAULT_DATASET,
+    EVAL_DIR,
+    EXPERIMENTS_DIR,
+    AskFn,
+    bridge_genai_env,
+    emit_progress,
+    make_ask,
+    run_with_retry,
+    write_report,
 )
+from scripts.evaluate import load_scenarios  # noqa: E402
 
-EVAL_DIR = PROJECT_ROOT / "eval"
-EXPERIMENTS_DIR = EVAL_DIR / "experiments"
-DEFAULT_DATASET = EVAL_DIR / "incidents.jsonl"
-
-AskFn = Callable[[str, float], Awaitable[str]]
+bridge_genai_env()
 
 
 # -------------------- result-file discovery --------------------
@@ -175,23 +170,6 @@ async def judge_scenario(
     return res
 
 
-def _make_ask() -> AskFn:
-    from google import genai
-    from google.genai import types as gt
-
-    client = genai.Client(api_key=settings.google_api_key)
-
-    async def ask(prompt: str, temperature: float) -> str:
-        resp = await client.aio.models.generate_content(
-            model=settings.gemini_model,
-            contents=prompt,
-            config=gt.GenerateContentConfig(temperature=temperature),
-        )
-        return resp.text or ""
-
-    return ask
-
-
 # -------------------- report --------------------
 
 
@@ -257,44 +235,41 @@ async def amain(args: argparse.Namespace) -> int:
     progress = args.progress_json
     n = len(matched)
     print(f"Pairwise: {va} vs {vb}, {n} matched scenarios", file=sys.stderr)
-    _emit_progress(progress, event="run_start", kind="pairwise", total=n,
-                   variant_a=va, variant_b=vb)
+    emit_progress(progress, event="run_start", kind="pairwise", total=n,
+                  variant_a=va, variant_b=vb)
 
-    ask = _make_ask()
+    ask = make_ask()
     results: list[PairResult] = []
     for i, s in enumerate(matched, 1):
         print(f"  [{i}/{n}] {s.id}", file=sys.stderr, flush=True)
-        _emit_progress(progress, event="scenario_start", i=i, n=n, id=s.id)
-        r = await judge_scenario(
-            s.id, s.log_chunk, gt[s.id].ground_truth_root_cause,
-            reports_a[s.id], reports_b[s.id], ask=ask,
-        )
-        attempt = 0
-        while _is_transient_error(r.error) and attempt < args.retries:
-            delay = args.retry_delay * (2**attempt)
-            print(f"      transient error on {s.id}; retry {attempt + 1}/{args.retries} "
-                  f"in {delay:.0f}s", file=sys.stderr, flush=True)
-            await asyncio.sleep(delay)
-            attempt += 1
-            r = await judge_scenario(
+        emit_progress(progress, event="scenario_start", i=i, n=n, id=s.id)
+        r = await run_with_retry(
+            partial(
+                judge_scenario,
                 s.id, s.log_chunk, gt[s.id].ground_truth_root_cause,
                 reports_a[s.id], reports_b[s.id], ask=ask,
-            )
+            ),
+            error_of=lambda res: res.error,
+            label=s.id,
+            retries=args.retries,
+            base_delay=args.retry_delay,
+        )
         results.append(r)
-        _emit_progress(progress, event="scenario_done", i=i, n=n, id=s.id,
-                       winner=r.winner, error=r.error)
+        emit_progress(progress, event="scenario_done", i=i, n=n, id=s.id,
+                      winner=r.winner, error=r.error)
 
-    EXPERIMENTS_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = time.strftime("%Y%m%d-%H%M%S")
-    md_path = EXPERIMENTS_DIR / f"pairwise-{va}-vs-{vb}-{timestamp}.md"
-    md_path.write_text(_render_report(results, va, vb), encoding="utf-8")
-    print(f"Wrote {md_path}", file=sys.stderr)
+    md_path = write_report(
+        EXPERIMENTS_DIR,
+        f"pairwise-{va}-vs-{vb}-{timestamp}.md",
+        _render_report(results, va, vb),
+    )
     a_wins = sum(1 for r in results if r.winner == "a" and not r.error)
     b_wins = sum(1 for r in results if r.winner == "b" and not r.error)
-    _emit_progress(progress, event="run_done",
-                   summary={"a_wins": a_wins, "b_wins": b_wins,
-                            "variant_a": va, "variant_b": vb},
-                   md_path=str(md_path))
+    emit_progress(progress, event="run_done",
+                  summary={"a_wins": a_wins, "b_wins": b_wins,
+                           "variant_a": va, "variant_b": vb},
+                  md_path=str(md_path))
     if not progress:
         print(json.dumps([asdict(r) for r in results], indent=2))
     return 0

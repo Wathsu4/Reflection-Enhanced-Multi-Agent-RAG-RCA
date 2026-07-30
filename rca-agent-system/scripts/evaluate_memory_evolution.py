@@ -36,7 +36,6 @@ import argparse
 import asyncio
 import json
 import sys
-import time
 from pathlib import Path
 from typing import Any
 
@@ -44,33 +43,18 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from rca_system.ablations import ABLATIONS, DETERMINISTIC_ABLATIONS, build_root_agent  # noqa: E402
+from rca_system.ablations import ABLATIONS, DETERMINISTIC_ABLATIONS  # noqa: E402
 from rca_system.memory.chroma_store import IncidentMemory  # noqa: E402
-from rca_system.settings import settings  # noqa: E402
+from scripts._eval_common import (  # noqa: E402
+    DEFAULT_DATASET,
+    bridge_genai_env,
+    emit_progress,
+    report_target,
+    stream_pipeline_events,
+    write_report,
+)
 
-# ADK's google-genai auth reads GOOGLE_API_KEY from the process environment,
-# but pydantic-settings only loads it into `settings`. Bridge it so the
-# in-process Runner authenticates whether run via CLI or the eval console.
-import os  # noqa: E402
-
-if settings.google_api_key and not os.environ.get("GOOGLE_API_KEY"):
-    os.environ["GOOGLE_API_KEY"] = settings.google_api_key
-if not os.environ.get("GOOGLE_GENAI_USE_VERTEXAI"):
-    os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = settings.google_genai_use_vertexai
-
-EVAL_DIR = PROJECT_ROOT / "eval"
-# Non-default ablation runs are experiments; keep them out of the
-# demo-ready eval/memory-evolution-*.md reports.
-EXPERIMENTS_DIR = EVAL_DIR / "experiments"
-DEFAULT_DATASET = EVAL_DIR / "incidents.jsonl"
-
-
-def _emit_progress(enabled: bool, **fields: Any) -> None:
-    """Emit one compact JSON lifecycle line to stdout when `--progress-json`
-    is set, for the eval-console JobManager. Human logging stays on stderr."""
-    if not enabled:
-        return
-    print(json.dumps(fields, default=str), flush=True)
+bridge_genai_env()
 
 
 def _load_in_domain(path: Path) -> list[dict[str, Any]]:
@@ -105,27 +89,9 @@ def _snapshot_scores() -> dict[str, float]:
 
 async def _run_pipeline(scenario: dict[str, Any], ablation: str = "none") -> bool:
     """Execute the pipeline variant for one scenario. Returns True on success."""
-    from google.adk.runners import Runner
-    from google.adk.sessions import InMemorySessionService
-    from google.genai.types import Content, Part
-
-    agent = build_root_agent(ablation)
-
-    session_service = InMemorySessionService()
-    session = await session_service.create_session(
-        app_name="rca_system", user_id="memory-eval"
-    )
-    runner = Runner(
-        agent=agent,
-        app_name="rca_system",
-        session_service=session_service,
-    )
-    msg = Content(role="user", parts=[Part(text=scenario["log_chunk"])])
     try:
-        async for _ in runner.run_async(
-            user_id=session.user_id,
-            session_id=session.id,
-            new_message=msg,
+        async for _ in stream_pipeline_events(
+            scenario["log_chunk"], ablation=ablation, user_id="memory-eval"
         ):
             pass
     except Exception as exc:
@@ -212,7 +178,7 @@ async def amain(args: argparse.Namespace) -> int:
         f"Memory-evolution eval: {n} scenarios, {args.runs} run(s)",
         file=sys.stderr,
     )
-    _emit_progress(
+    emit_progress(
         progress,
         event="run_start",
         kind="memory_evolution",
@@ -229,7 +195,7 @@ async def amain(args: argparse.Namespace) -> int:
         for i, sc in enumerate(scenarios, 1):
             step += 1
             print(f"  [{i}/{n}] {sc['id']}", file=sys.stderr, flush=True)
-            _emit_progress(
+            emit_progress(
                 progress,
                 event="scenario_start",
                 i=step,
@@ -238,7 +204,7 @@ async def amain(args: argparse.Namespace) -> int:
                 run=run_idx,
             )
             ok = await _run_pipeline(sc, ablation=args.ablation)
-            _emit_progress(
+            emit_progress(
                 progress,
                 event="scenario_done",
                 i=step,
@@ -249,18 +215,9 @@ async def amain(args: argparse.Namespace) -> int:
             )
         snapshots.append(_snapshot_scores())
 
-    timestamp = time.strftime("%Y%m%d-%H%M%S")
     md = _render_report(snapshots, [sc["id"] for sc in scenarios], args.ablation)
-    if args.ablation == "none":
-        out_dir = EVAL_DIR
-        stem = f"memory-evolution-{timestamp}"
-    else:
-        out_dir = EXPERIMENTS_DIR
-        stem = f"memory-evolution-{args.ablation}-{timestamp}"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    md_path = out_dir / f"{stem}.md"
-    md_path.write_text(md, encoding="utf-8")
-    print(f"\nWrote {md_path}", file=sys.stderr)
+    out_dir, stem = report_target("memory-evolution", args.ablation)
+    md_path = write_report(out_dir, f"{stem}.md", md)
     # Drift summary for the run_done event.
     baseline, final = snapshots[0], snapshots[-1]
     drift = {
@@ -268,7 +225,7 @@ async def amain(args: argparse.Namespace) -> int:
         "demoted": sum(1 for k, v in final.items() if v < baseline.get(k, 1.0)),
         "unchanged": sum(1 for k, v in final.items() if v == baseline.get(k, 1.0)),
     }
-    _emit_progress(
+    emit_progress(
         progress,
         event="run_done",
         summary={"drift": drift, "snapshots": snapshots},

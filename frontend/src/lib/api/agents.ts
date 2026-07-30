@@ -17,6 +17,12 @@
 
 import { v4 as uuidv4 } from "uuid";
 
+import {
+  createHttpClient,
+  readDetail,
+  ServiceHttpError,
+  ServiceNetworkError,
+} from "@/lib/api/http";
 import type { AdkEvent } from "@/lib/types";
 
 const AGENT_URL =
@@ -31,80 +37,23 @@ export interface AgentHealthResponse {
 }
 
 /** Network-level failures: DNS, connection refused, CORS, abort. */
-export class AgentNetworkError extends Error {
-  constructor(message: string, public cause?: unknown) {
-    super(message);
-    this.name = "AgentNetworkError";
-  }
+export class AgentNetworkError extends ServiceNetworkError {
+  name = "AgentNetworkError";
 }
 
 /** Non-2xx HTTP responses from the agent service. */
-export class AgentHttpError extends Error {
-  constructor(
-    public status: number,
-    message: string,
-    public detail?: string,
-  ) {
-    super(message);
-    this.name = "AgentHttpError";
-  }
+export class AgentHttpError extends ServiceHttpError {
+  name = "AgentHttpError";
 }
 
-async function readDetail(res: Response): Promise<string | undefined> {
-  try {
-    const ct = res.headers.get("content-type") ?? "";
-    if (!ct.includes("application/json")) return undefined;
-    const body = (await res.json()) as { detail?: unknown };
-    if (typeof body?.detail === "string") return body.detail;
-    if (Array.isArray(body?.detail)) {
-      return body.detail
-        .map((d: { msg?: string }) => d?.msg ?? JSON.stringify(d))
-        .join("; ");
-    }
-    return undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/** Wraps `fetch` so transport vs. server errors are distinguishable. */
-async function safeFetch(
-  url: string,
-  init: RequestInit,
-): Promise<Response> {
-  try {
-    return await fetch(url, init);
-  } catch (err) {
-    throw new AgentNetworkError(
-      `Could not reach agent service at ${url}`,
-      err,
-    );
-  }
-}
-
-async function fetchJson<T>(
-  url: string,
-  init: RequestInit,
-): Promise<T> {
-  const res = await safeFetch(url, init);
-  if (!res.ok) {
-    const detail = await readDetail(res);
-    const friendly =
-      res.status >= 500
-        ? `Agent service error (${res.status})`
-        : `Agent rejected the request (${res.status})`;
-    throw new AgentHttpError(res.status, friendly, detail);
-  }
-  try {
-    return (await res.json()) as T;
-  } catch (err) {
-    throw new AgentHttpError(
-      res.status,
-      "Agent service returned invalid JSON",
-      err instanceof Error ? err.message : undefined,
-    );
-  }
-}
+const { safeFetch, fetchJson } = createHttpClient({
+  NetworkError: AgentNetworkError,
+  HttpError: AgentHttpError,
+  unreachableMessage: (url) => `Could not reach agent service at ${url}`,
+  serverErrorMessage: (status) => `Agent service error (${status})`,
+  rejectedMessage: (status) => `Agent rejected the request (${status})`,
+  invalidJsonMessage: "Agent service returned invalid JSON",
+});
 
 // -------------------- Public URL builders --------------------
 // Exposed (with `__test__`) so unit tests can pin the path shape

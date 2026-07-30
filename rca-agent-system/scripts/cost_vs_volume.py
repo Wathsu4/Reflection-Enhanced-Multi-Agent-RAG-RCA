@@ -28,14 +28,10 @@ from pathlib import Path
 from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-EVAL_DIR = PROJECT_ROOT / "eval"
-EXPERIMENTS_DIR = EVAL_DIR / "experiments"
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-
-def _emit_progress(enabled: bool, **fields: Any) -> None:
-    if not enabled:
-        return
-    print(json.dumps(fields, default=str), flush=True)
+from scripts._eval_common import EXPERIMENTS_DIR, emit_progress, write_report  # noqa: E402
 
 
 def simulate(
@@ -132,19 +128,18 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     progress = args.progress_json
 
-    _emit_progress(progress, event="run_start", kind="cost_vs_volume", total=1)
-    _emit_progress(progress, event="scenario_start", i=1, n=1, id="simulation")
+    emit_progress(progress, event="run_start", kind="cost_vs_volume", total=1)
+    emit_progress(progress, event="scenario_start", i=1, n=1, id="simulation")
     s = simulate(
         args.total_chunks, args.incident_pct, args.calls_per_rca,
         args.classifier_ms, args.rca_seconds,
     )
-    EXPERIMENTS_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = time.strftime("%Y%m%d-%H%M%S")
-    md_path = EXPERIMENTS_DIR / f"cost-vs-volume-{timestamp}.md"
-    md_path.write_text(_render_report(s), encoding="utf-8")
-    print(f"Wrote {md_path}", file=sys.stderr)
-    _emit_progress(progress, event="scenario_done", i=1, n=1, id="simulation", error=None)
-    _emit_progress(progress, event="run_done", summary=s, md_path=str(md_path))
+    md_path = write_report(
+        EXPERIMENTS_DIR, f"cost-vs-volume-{timestamp}.md", _render_report(s)
+    )
+    emit_progress(progress, event="scenario_done", i=1, n=1, id="simulation", error=None)
+    emit_progress(progress, event="run_done", summary=s, md_path=str(md_path))
     if not progress:
         print(json.dumps(s, indent=2))
     return 0

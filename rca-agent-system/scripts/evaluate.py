@@ -37,6 +37,7 @@ import statistics
 import sys
 import time
 from dataclasses import asdict, dataclass, field
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -44,42 +45,20 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from rca_system.ablations import ABLATIONS, DETERMINISTIC_ABLATIONS, build_root_agent  # noqa: E402
-from rca_system.settings import settings  # noqa: E402
+from rca_system.ablations import ABLATIONS, DETERMINISTIC_ABLATIONS  # noqa: E402
+from scripts._eval_common import (  # noqa: E402
+    DEFAULT_DATASET,
+    bridge_genai_env,
+    emit_progress,
+    make_ask,
+    report_target,
+    run_with_retry,
+    state_delta,
+    stream_pipeline_events,
+    write_report,
+)
 
-# ADK's google-genai auth reads GOOGLE_API_KEY from the process environment,
-# but pydantic-settings only loads it into `settings` (it never exports it).
-# When this script runs the in-process ADK Runner -- via CLI or the eval
-# console subprocess -- bridge the key into os.environ so the pipeline can
-# authenticate. (The HTTP server gets this for free from ADK's own .env load.)
-import os  # noqa: E402
-
-if settings.google_api_key and not os.environ.get("GOOGLE_API_KEY"):
-    os.environ["GOOGLE_API_KEY"] = settings.google_api_key
-if not os.environ.get("GOOGLE_GENAI_USE_VERTEXAI"):
-    os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = settings.google_genai_use_vertexai
-
-EVAL_DIR = PROJECT_ROOT / "eval"
-# Ablation / baseline runs land here so they never clobber the demo-ready
-# `eval/results-*.md` reports (see How-To-Evaluate/PLAN.md decision log).
-EXPERIMENTS_DIR = EVAL_DIR / "experiments"
-DEFAULT_DATASET = EVAL_DIR / "incidents.jsonl"
-
-
-# -------------------- progress (for the eval UI) --------------------
-
-
-def _emit_progress(enabled: bool, **fields: Any) -> None:
-    """Emit one compact JSON lifecycle line to stdout when `--progress-json`
-    is set. The eval-console JobManager tails these lines to drive the live
-    progress UI. Human-readable logging stays on stderr regardless.
-
-    Each line has an `event` key, one of: run_start, scenario_start,
-    scenario_done, run_done.
-    """
-    if not enabled:
-        return
-    print(json.dumps(fields, default=str), flush=True)
+bridge_genai_env()
 
 
 # -------------------- dataset I/O --------------------
@@ -369,32 +348,10 @@ async def _run_pipeline_for_scenario(
     if ablation in DETERMINISTIC_ABLATIONS:
         return _run_retrieval_only(scenario)
 
-    from google.adk.runners import Runner
-    from google.adk.sessions import InMemorySessionService
-    from google.genai.types import Content, Part
-
-    agent = build_root_agent(ablation)
-
     result = ScenarioResult(
         id=scenario.id,
         expected_incident_id=scenario.expected_incident_id,
         ablation=ablation,
-    )
-
-    session_service = InMemorySessionService()
-    session = await session_service.create_session(
-        app_name="rca_system",
-        user_id="evaluator",
-    )
-    runner = Runner(
-        agent=agent,
-        app_name="rca_system",
-        session_service=session_service,
-    )
-
-    user_message = Content(
-        role="user",
-        parts=[Part(text=scenario.log_chunk)],
     )
 
     started = time.perf_counter()
@@ -409,10 +366,8 @@ async def _run_pipeline_for_scenario(
     final_output: str | None = None
     retrieval_payload: Any = None
     try:
-        async for event in runner.run_async(
-            user_id=session.user_id,
-            session_id=session.id,
-            new_message=user_message,
+        async for event in stream_pipeline_events(
+            scenario.log_chunk, ablation=ablation, user_id="evaluator"
         ):
             now = time.perf_counter()
             author = getattr(event, "author", None) or "unknown"
@@ -440,14 +395,13 @@ async def _run_pipeline_for_scenario(
                 # Best-effort: don't let serialization break the eval.
                 events_dict.append({"author": author})
 
-            actions = getattr(event, "actions", None)
-            state_delta = getattr(actions, "state_delta", None) or {}
-            if "final_output" in state_delta:
-                v = state_delta["final_output"]
+            delta = state_delta(event)
+            if "final_output" in delta:
+                v = delta["final_output"]
                 if isinstance(v, str) and v.strip():
                     final_output = v
-            if "retrieval_output" in state_delta:
-                retrieval_payload = state_delta["retrieval_output"]
+            if "retrieval_output" in delta:
+                retrieval_payload = delta["retrieval_output"]
 
             _apply_reflection_diagnostics(result, event, stage_tokens)
     except Exception as exc:
@@ -480,10 +434,7 @@ async def _llm_judge(
     if not hypothesis.strip():
         return "no"
 
-    from google import genai
-    from google.genai import types as genai_types
-
-    client = genai.Client(api_key=settings.google_api_key)
+    ask = make_ask()
 
     prompt = (
         "You are a strict reviewer of root-cause analysis hypotheses.\n\n"
@@ -499,12 +450,7 @@ async def _llm_judge(
     votes: list[str] = []
     for _ in range(n):
         try:
-            resp = await client.aio.models.generate_content(
-                model=settings.gemini_model,
-                contents=prompt,
-                config=genai_types.GenerateContentConfig(temperature=0.0),
-            )
-            txt = (resp.text or "").strip().lower().split()[0]
+            txt = (await ask(prompt)).strip().lower().split()[0]
             votes.append(txt if txt in {"yes", "partial", "no"} else "no")
         except Exception:
             votes.append("error")
@@ -733,53 +679,6 @@ def render_markdown_report(
     return "\n".join(lines)
 
 
-# -------------------- transient-error retry --------------------
-
-# Substrings that mark a *transient* Gemini failure worth retrying (server
-# overload / rate limit), as opposed to a real bug. Matched against the
-# captured error string case-insensitively.
-_TRANSIENT_MARKERS = (
-    "503",
-    "unavailable",
-    "high demand",
-    "429",
-    "resource_exhausted",
-    "rate limit",
-    "deadline",
-    "timeout",
-)
-
-
-def _is_transient_error(err: str | None) -> bool:
-    if not err:
-        return False
-    low = err.lower()
-    return any(m in low for m in _TRANSIENT_MARKERS)
-
-
-async def _run_with_retry(
-    scenario: Scenario, ablation: str, retries: int, base_delay: float
-) -> ScenarioResult:
-    """Run one scenario, retrying on *transient* Gemini errors with
-    exponential backoff. Non-transient errors (and success) return on the
-    first attempt. This keeps a 503 spike from corrupting the comparison
-    across ablation variants."""
-    r = await _run_pipeline_for_scenario(scenario, ablation=ablation)
-    attempt = 0
-    while _is_transient_error(r.error) and attempt < retries:
-        delay = base_delay * (2**attempt)
-        print(
-            f"      transient error on {scenario.id}; retry "
-            f"{attempt + 1}/{retries} in {delay:.0f}s",
-            file=sys.stderr,
-            flush=True,
-        )
-        await asyncio.sleep(delay)
-        attempt += 1
-        r = await _run_pipeline_for_scenario(scenario, ablation=ablation)
-    return r
-
-
 # -------------------- entry point --------------------
 
 
@@ -793,7 +692,7 @@ async def amain(args: argparse.Namespace) -> int:
     progress = args.progress_json
     print(f"Pipeline variant: {ablation}", file=sys.stderr)
     n = len(scenarios)
-    _emit_progress(
+    emit_progress(
         progress,
         event="run_start",
         kind="pipeline",
@@ -805,15 +704,21 @@ async def amain(args: argparse.Namespace) -> int:
     results: list[ScenarioResult] = []
     for i, sc in enumerate(scenarios, 1):
         print(f"  [{i}/{n}] {sc.id} …", file=sys.stderr, flush=True)
-        _emit_progress(progress, event="scenario_start", i=i, n=n, id=sc.id)
-        r = await _run_with_retry(sc, ablation, args.retries, args.retry_delay)
+        emit_progress(progress, event="scenario_start", i=i, n=n, id=sc.id)
+        r = await run_with_retry(
+            partial(_run_pipeline_for_scenario, sc, ablation=ablation),
+            error_of=lambda res: res.error,
+            label=sc.id,
+            retries=args.retries,
+            base_delay=args.retry_delay,
+        )
         if args.llm_judge and r.extracted_root_cause and r.error is None:
             try:
                 r.llm_judge_verdict = await _llm_judge(sc, r.extracted_root_cause)
             except Exception as exc:
                 r.llm_judge_verdict = f"error: {type(exc).__name__}"
         results.append(r)
-        _emit_progress(
+        emit_progress(
             progress,
             event="scenario_done",
             i=i,
@@ -826,20 +731,10 @@ async def amain(args: argparse.Namespace) -> int:
         )
 
     summary = summarize(results)
-    timestamp = time.strftime("%Y%m%d-%H%M%S")
-    # Non-default variants are experiments -- keep them out of the
-    # demo-ready eval/ reports and tag the filename with the variant.
-    if ablation == "none":
-        out_dir = EVAL_DIR
-        stem = f"results-{timestamp}"
-    else:
-        out_dir = EXPERIMENTS_DIR
-        stem = f"results-{ablation}-{timestamp}"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    json_path = out_dir / f"{stem}.json"
-    md_path = out_dir / f"{stem}.md"
-
-    json_path.write_text(
+    out_dir, stem = report_target("results", ablation)
+    json_path = write_report(
+        out_dir,
+        f"{stem}.json",
         json.dumps(
             {
                 "summary": summary,
@@ -847,12 +742,12 @@ async def amain(args: argparse.Namespace) -> int:
             },
             indent=2,
         ),
-        encoding="utf-8",
     )
-    md_path.write_text(render_markdown_report(results, summary), encoding="utf-8")
+    md_path = write_report(
+        out_dir, f"{stem}.md", render_markdown_report(results, summary)
+    )
 
-    print(f"\nWrote {json_path} and {md_path}", file=sys.stderr)
-    _emit_progress(
+    emit_progress(
         progress,
         event="run_done",
         summary=summary,

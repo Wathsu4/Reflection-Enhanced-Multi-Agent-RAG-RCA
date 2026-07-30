@@ -1,3 +1,8 @@
+import {
+  createHttpClient,
+  ServiceHttpError,
+  ServiceNetworkError,
+} from "@/lib/api/http";
 import type {
   ClassifyResponse,
   GenerateLogsRequest,
@@ -23,79 +28,23 @@ export interface HealthResponse {
 }
 
 /** Fired when fetch itself rejects (DNS, connection refused, CORS, abort). */
-export class ClassifierNetworkError extends Error {
-  constructor(message: string, public cause?: unknown) {
-    super(message);
-    this.name = "ClassifierNetworkError";
-  }
+export class ClassifierNetworkError extends ServiceNetworkError {
+  name = "ClassifierNetworkError";
 }
 
 /** Fired when the server returns a non-2xx response. */
-export class ClassifierHttpError extends Error {
-  constructor(
-    public status: number,
-    message: string,
-    /** Parsed error payload from the server (FastAPI's `detail`), if any. */
-    public detail?: string,
-  ) {
-    super(message);
-    this.name = "ClassifierHttpError";
-  }
+export class ClassifierHttpError extends ServiceHttpError {
+  name = "ClassifierHttpError";
 }
 
-/** Try to extract FastAPI-style `{detail: "..."}` from a failed response. */
-async function readDetail(res: Response): Promise<string | undefined> {
-  try {
-    const ct = res.headers.get("content-type") ?? "";
-    if (!ct.includes("application/json")) return undefined;
-    const body = (await res.json()) as { detail?: unknown };
-    if (typeof body?.detail === "string") return body.detail;
-    if (Array.isArray(body?.detail)) {
-      // FastAPI 422 returns an array of validation errors; join them.
-      return body.detail
-        .map((d: { msg?: string }) => d?.msg ?? JSON.stringify(d))
-        .join("; ");
-    }
-    return undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-async function jsonFetch<T>(
-  url: string,
-  init: RequestInit,
-): Promise<T> {
-  let res: Response;
-  try {
-    res = await fetch(url, init);
-  } catch (err) {
-    // `fetch` only rejects on network failure / abort.
-    throw new ClassifierNetworkError(
-      `Could not reach classifier service at ${url}`,
-      err,
-    );
-  }
-
-  if (!res.ok) {
-    const detail = await readDetail(res);
-    const friendly =
-      res.status >= 500
-        ? `Classifier service error (${res.status})`
-        : `Classifier rejected the request (${res.status})`;
-    throw new ClassifierHttpError(res.status, friendly, detail);
-  }
-
-  try {
-    return (await res.json()) as T;
-  } catch (err) {
-    throw new ClassifierHttpError(
-      res.status,
-      "Classifier returned invalid JSON",
-      err instanceof Error ? err.message : undefined,
-    );
-  }
-}
+const { fetchJson: jsonFetch } = createHttpClient({
+  NetworkError: ClassifierNetworkError,
+  HttpError: ClassifierHttpError,
+  unreachableMessage: (url) => `Could not reach classifier service at ${url}`,
+  serverErrorMessage: (status) => `Classifier service error (${status})`,
+  rejectedMessage: (status) => `Classifier rejected the request (${status})`,
+  invalidJsonMessage: "Classifier returned invalid JSON",
+});
 
 export async function classify(logChunk: string): Promise<ClassifyResponse> {
   if (USE_MOCK) return mockClassify(logChunk);
